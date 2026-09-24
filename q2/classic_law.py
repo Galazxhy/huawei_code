@@ -18,9 +18,9 @@ data/real_attachments/B_scaling_laws/pythia_training_log_existing.csv
 
 示例：
 
-    python q1/traditional_scaling_law.py
-    python q1/traditional_scaling_law.py --cv --bootstrap 200
-    python q1/traditional_scaling_law.py --input other.csv --target val_loss
+    python q2/classic_law.py
+    python q2/classic_law.py --cv --bootstrap 200
+    python q2/classic_law.py --input other.csv --target val_loss
 """
 
 from __future__ import annotations

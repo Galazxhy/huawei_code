@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""用 B2--B5 验证表现对经典标度律进行“结构早停”。
+"""对标准五参数标度律执行基于参数释放路径的结构早停。
 
-这里的早停不是神经网络训练中的 epoch 早停。经典标度律只有少量参数，
-更合理的做法是沿着模型复杂度路径逐级拟合：
+全过程保持模型形式不变：
 
-    1. compute_only:      L = E + C (N D)^(-s)
-    2. shared_exponent:   L = E + A N^(-s) + B D^(-s)
-    3. classic:           L = E + A N^(-alpha) + B D^(-beta)
-    4. interaction:       classic + C (N D)^(-gamma)
+    L(N, D) = E + A N^(-alpha) + B D^(-beta)
 
-所有候选模型只使用 B1 拟合。B2--B5 仅用于计算验证分数并决定是否继续
-增加自由度。若验证分数连续 ``patience`` 个复杂度阶段没有实质改善，就停止，
-并回滚到历史最优模型。
+对给定的 ``alpha``、``beta``，始终以线性最小二乘估计 ``E``、``A``、``B``；
+非线性指数则沿以下约束路径逐层释放：
+
+    1. shared_exponent:              alpha = beta = s，一维搜索 s；
+    2. release_parameter_exponent:   beta 固定为 s*，一维搜索 alpha；
+    3. release_data_exponent:        alpha 固定为 s*，一维搜索 beta；
+    4. classic:                      二维搜索 alpha、beta。
+
+第二、三项是同一复杂度层的并列候选。所有网格点都只用主拟合数据选择；
+多来源外部 Loss 先经分簇交叉仿射归一化映射到主拟合尺度，再用于判断是否
+值得释放更多指数自由度。若验证分数连续
+``patience`` 个复杂度层没有实质改善，就停止并回滚到历史最优约束结构。
 
 默认运行：
 
-    conda run -n GNN python q1/scaling_law_early_stopping.py
+    conda run -n GNN python q2/classic_law_early_stopping.py
 
 结果写入 ``data_analysis/scaling_law_early_stopping/``。
 """
@@ -33,23 +38,264 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.stats import spearmanr
 
-from scaling_law_full_analysis import (
-    DEFAULT_B_DIR,
-    affine_recalibration,
-    calculate_metrics,
-    load_b3_observations,
-    load_classic_observations,
-    observed_losses,
-)
-from traditional_scaling_law import Observation, fit_scaling_law
+from classic_law import Observation, fit_scaling_law
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_B_DIR = PROJECT_ROOT / "data" / "real_attachments" / "B_scaling_laws"
 DEFAULT_OUTPUT_DIR = (
     PROJECT_ROOT / "data_analysis" / "scaling_law_early_stopping"
 )
+
+
+@dataclass(frozen=True)
+class Metrics:
+    sample_count: int
+    rmse: float
+    mae: float
+    mape: float
+    median_ape: float
+    p90_ape: float
+    bias: float
+    r_squared: float
+    spearman_rho: float
+
+
+def _float(value: str | None) -> float | None:
+    try:
+        parsed = float((value or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        raise FileNotFoundError(f"找不到数据文件：{path}")
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def load_classic_observations(
+    path: Path,
+    row_id_column: str,
+    converged_only: bool = False,
+    final_checkpoint_only: bool = False,
+    step_column: str = "steps",
+) -> list[Observation]:
+    """读取标度律观测；可按运行选择最大训练步的最终 checkpoint。"""
+
+    indexed_rows = list(enumerate(read_csv(path), start=2))
+    if converged_only:
+        indexed_rows = [
+            (index, row)
+            for index, row in indexed_rows
+            if (row.get("is_converged") or "").strip()
+            in {"1", "1.0", "true", "True"}
+        ]
+    if final_checkpoint_only:
+        latest_by_run: dict[str, tuple[int, dict[str, str]]] = {}
+        latest_key: dict[str, tuple[float, float, int]] = {}
+        for index, row in indexed_rows:
+            run_id = (row.get(row_id_column) or str(index)).strip()
+            step_value = _float(row.get(step_column))
+            token_value = _float(row.get("D_tokens_B"))
+            ordering = (
+                step_value if step_value is not None else -math.inf,
+                token_value if token_value is not None else -math.inf,
+                index,
+            )
+            if run_id not in latest_key or ordering > latest_key[run_id]:
+                latest_key[run_id] = ordering
+                latest_by_run[run_id] = (index, row)
+        indexed_rows = sorted(latest_by_run.values(), key=lambda item: item[0])
+
+    observations: list[Observation] = []
+    for index, row in indexed_rows:
+        n_value = _float(row.get("N_params_B"))
+        d_value = _float(row.get("D_tokens_B"))
+        loss = _float(row.get("val_loss"))
+        if (
+            n_value is None
+            or d_value is None
+            or loss is None
+            or min(n_value, d_value, loss) <= 0
+        ):
+            continue
+        observations.append(
+            Observation(
+                row_id=(row.get(row_id_column) or str(index)).strip(),
+                n_params_b=n_value,
+                d_tokens_b=d_value,
+                loss=loss,
+            )
+        )
+    if not observations:
+        raise ValueError(f"{path.name} 中没有可用的 N-D-Loss 记录。")
+    return observations
+
+
+def load_b3_observations(b_dir: Path) -> list[Observation]:
+    observations: list[Observation] = []
+    trajectory_dir = b_dir / "training_trajectories"
+    files = sorted(trajectory_dir.glob("pythia_*_trajectory.csv"))
+    if not files:
+        raise FileNotFoundError(f"{trajectory_dir} 中没有 B3 轨迹文件。")
+    for file_path in files:
+        for index, row in enumerate(read_csv(file_path), start=2):
+            n_value = _float(row.get("N_params_B"))
+            d_value = _float(row.get("D_tokens_B"))
+            loss = _float(row.get("val_loss"))
+            if (
+                n_value is None
+                or d_value is None
+                or loss is None
+                or min(n_value, d_value, loss) <= 0
+            ):
+                continue
+            observations.append(
+                Observation(
+                    row_id=f"{file_path.stem}:{index}",
+                    n_params_b=n_value,
+                    d_tokens_b=d_value,
+                    loss=loss,
+                )
+            )
+    return observations
+
+
+def observed_losses(observations: Sequence[Observation]) -> np.ndarray:
+    return np.asarray([item.loss for item in observations], dtype=float)
+
+
+def calculate_metrics(actual: np.ndarray, predicted: np.ndarray) -> Metrics:
+    if actual.size == 0 or actual.size != predicted.size:
+        raise ValueError("actual 和 predicted 必须为等长非空数组。")
+    residual = actual - predicted
+    absolute_percentage_error = np.abs(residual) / np.maximum(
+        np.abs(actual), 1e-12
+    )
+    total_sum_squares = float(np.sum(np.square(actual - actual.mean())))
+    residual_sum_squares = float(np.sum(np.square(residual)))
+    r_squared = (
+        1.0 - residual_sum_squares / total_sum_squares
+        if total_sum_squares > 0
+        else math.nan
+    )
+    rho = spearmanr(actual, predicted).statistic
+    return Metrics(
+        sample_count=int(actual.size),
+        rmse=float(np.sqrt(np.mean(np.square(residual)))),
+        mae=float(np.mean(np.abs(residual))),
+        mape=float(np.mean(absolute_percentage_error)),
+        median_ape=float(np.median(absolute_percentage_error)),
+        p90_ape=float(np.quantile(absolute_percentage_error, 0.90)),
+        bias=float(np.mean(residual)),
+        r_squared=float(r_squared),
+        spearman_rho=float(rho),
+    )
+
+
+def affine_recalibration(
+    actual: np.ndarray, predicted: np.ndarray
+) -> tuple[float, float, Metrics]:
+    design = np.column_stack((np.ones_like(predicted), predicted))
+    intercept, slope = np.linalg.lstsq(design, actual, rcond=None)[0]
+    recalibrated = intercept + slope * predicted
+    return float(intercept), float(slope), calculate_metrics(actual, recalibrated)
+
+
+def cross_fitted_loss_normalization(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    cluster_ids: Sequence[str] | None = None,
+) -> dict[str, object]:
+    """把外部 Loss 仿射映射到主拟合尺度，并以分簇留一避免原地校准。
+
+    假设不同来源的观测 Loss 满足 ``L_source = a + b*L_reference``。
+    每个留出簇的 ``a,b`` 仅由其余簇估计，再用逆变换
+    ``(L_source-a)/b`` 得到参考尺度上的验证目标。
+    """
+
+    if actual.size == 0 or actual.size != predicted.size:
+        raise ValueError("actual 和 predicted 必须为等长非空数组。")
+    if cluster_ids is None:
+        labels = np.asarray([str(index) for index in range(actual.size)])
+    else:
+        if len(cluster_ids) != actual.size:
+            raise ValueError("cluster_ids 必须与观测数组等长。")
+        labels = np.asarray([str(item) for item in cluster_ids])
+    unique_labels = list(dict.fromkeys(labels.tolist()))
+
+    normalized_actual = np.empty_like(actual, dtype=float)
+    calibrated_raw_prediction = np.empty_like(actual, dtype=float)
+    folds: list[dict[str, object]] = []
+
+    def fit_affine(indices: np.ndarray) -> tuple[float, float]:
+        x_value = predicted[indices]
+        y_value = actual[indices]
+        design = np.column_stack((np.ones_like(x_value), x_value))
+        intercept, slope = np.linalg.lstsq(design, y_value, rcond=None)[0]
+        if not math.isfinite(float(slope)) or slope <= 1e-8:
+            x_scale = max(float(np.std(x_value)), 1e-12)
+            slope = max(float(np.std(y_value)) / x_scale, 1e-8)
+            intercept = float(np.mean(y_value) - slope * np.mean(x_value))
+        return float(intercept), float(slope)
+
+    if len(unique_labels) < 2:
+        # 单簇数据无法交叉校准；保留诊断结果并显式标记为同样本校准。
+        train_indices = np.arange(actual.size)
+        intercept, slope = fit_affine(train_indices)
+        normalized_actual[:] = (actual - intercept) / slope
+        calibrated_raw_prediction[:] = intercept + slope * predicted
+        folds.append(
+            {
+                "held_out_cluster": unique_labels[0] if unique_labels else "all",
+                "calibration_sample_count": int(actual.size),
+                "validation_sample_count": int(actual.size),
+                "intercept": intercept,
+                "slope": slope,
+                "in_sample_fallback": True,
+            }
+        )
+        method = "in-sample affine fallback"
+    else:
+        for label in unique_labels:
+            test_mask = labels == label
+            train_indices = np.flatnonzero(~test_mask)
+            test_indices = np.flatnonzero(test_mask)
+            intercept, slope = fit_affine(train_indices)
+            normalized_actual[test_indices] = (
+                actual[test_indices] - intercept
+            ) / slope
+            calibrated_raw_prediction[test_indices] = (
+                intercept + slope * predicted[test_indices]
+            )
+            folds.append(
+                {
+                    "held_out_cluster": label,
+                    "calibration_sample_count": int(train_indices.size),
+                    "validation_sample_count": int(test_indices.size),
+                    "intercept": intercept,
+                    "slope": slope,
+                    "in_sample_fallback": False,
+                }
+            )
+        method = "leave-one-cluster-out affine loss normalization"
+
+    normalized_metrics = calculate_metrics(normalized_actual, predicted)
+    raw_calibrated_metrics = calculate_metrics(actual, calibrated_raw_prediction)
+    normalized_std = max(float(np.std(normalized_actual)), 1e-12)
+    return {
+        "method": method,
+        "fold_count": len(folds),
+        "normalized_metrics": asdict(normalized_metrics),
+        "normalized_rmse_over_std": normalized_metrics.rmse / normalized_std,
+        "raw_calibrated_metrics": asdict(raw_calibrated_metrics),
+        "folds": folds,
+    }
 
 
 @dataclass(frozen=True)
@@ -58,6 +304,9 @@ class ModelSpec:
     parameter_names: tuple[str, ...]
     description: str
     predict: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray]
+    search_mode: str
+    effective_parameter_count: int
+    layer: int
 
 
 @dataclass
@@ -83,24 +332,6 @@ def configure_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
-def _compute_only(
-    parameters: np.ndarray, n_value: np.ndarray, d_value: np.ndarray
-) -> np.ndarray:
-    e_value, coefficient, exponent = parameters
-    return e_value + coefficient * np.power(n_value * d_value, -exponent)
-
-
-def _shared_exponent(
-    parameters: np.ndarray, n_value: np.ndarray, d_value: np.ndarray
-) -> np.ndarray:
-    e_value, a_value, b_value, exponent = parameters
-    return (
-        e_value
-        + a_value * np.power(n_value, -exponent)
-        + b_value * np.power(d_value, -exponent)
-    )
-
-
 def _classic(
     parameters: np.ndarray, n_value: np.ndarray, d_value: np.ndarray
 ) -> np.ndarray:
@@ -112,42 +343,42 @@ def _classic(
     )
 
 
-def _interaction(
-    parameters: np.ndarray, n_value: np.ndarray, d_value: np.ndarray
-) -> np.ndarray:
-    e_value, a_value, alpha, b_value, beta, c_value, gamma = parameters
-    return (
-        e_value
-        + a_value * np.power(n_value, -alpha)
-        + b_value * np.power(d_value, -beta)
-        + c_value * np.power(n_value * d_value, -gamma)
-    )
-
-
 MODEL_PATH = (
     ModelSpec(
-        "compute_only",
-        ("E", "C", "s"),
-        "仅使用总计算量 ND 的三参数基线",
-        _compute_only,
+        "shared_exponent",
+        ("E", "A", "alpha", "B", "beta"),
+        "标准标度律的共享指数约束：alpha=beta=s",
+        _classic,
+        "shared",
+        4,
+        1,
     ),
     ModelSpec(
-        "shared_exponent",
-        ("E", "A", "B", "s"),
-        "参数项和数据项共享指数",
-        _shared_exponent,
+        "release_parameter_exponent",
+        ("E", "A", "alpha", "B", "beta"),
+        "固定 beta=s*，单独释放参数规模指数 alpha",
+        _classic,
+        "release_alpha",
+        5,
+        2,
+    ),
+    ModelSpec(
+        "release_data_exponent",
+        ("E", "A", "alpha", "B", "beta"),
+        "固定 alpha=s*，单独释放数据规模指数 beta",
+        _classic,
+        "release_beta",
+        5,
+        2,
     ),
     ModelSpec(
         "classic",
         ("E", "A", "alpha", "B", "beta"),
-        "经典五参数标度律",
+        "标准五参数标度律：alpha、beta 均自由",
         _classic,
-    ),
-    ModelSpec(
-        "classic_plus_interaction",
-        ("E", "A", "alpha", "B", "beta", "C", "gamma"),
-        "经典模型增加 ND 交互项；用于检测继续增复杂度是否过拟合",
-        _interaction,
+        "full",
+        5,
+        3,
     ),
 )
 
@@ -162,89 +393,117 @@ def arrays(
     )
 
 
+def _linear_fit_at_exponents(
+    observations: Sequence[Observation],
+    alpha: float,
+    beta: float,
+) -> tuple[np.ndarray, np.ndarray, float] | None:
+    """固定指数后，以线性最小二乘估计 E、A、B。"""
+
+    n_value, d_value, actual = arrays(observations)
+    design = np.column_stack(
+        (
+            np.ones_like(actual),
+            np.power(n_value, -alpha),
+            np.power(d_value, -beta),
+        )
+    )
+    coefficients = np.linalg.lstsq(design, actual, rcond=None)[0]
+    e_value, a_value, b_value = map(float, coefficients)
+    if (
+        e_value < 0.0
+        or a_value < 0.0
+        or b_value < 0.0
+        or e_value >= float(np.min(actual))
+    ):
+        return None
+    parameters = np.asarray(
+        [e_value, a_value, alpha, b_value, beta], dtype=float
+    )
+    prediction = _classic(parameters, n_value, d_value)
+    sse = float(np.sum(np.square(actual - prediction)))
+    return parameters, prediction, sse
+
+
+def _search_one_exponent(
+    observations: Sequence[Observation],
+    mode: str,
+    fixed_exponent: float | None,
+    lower: float,
+    upper: float,
+    grid_size: int,
+    tolerance: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """执行共享指数或单坐标释放的一维可分离搜索。"""
+
+    if grid_size < 5:
+        raise ValueError("grid_size 至少为 5。")
+
+    def evaluate(value: float) -> tuple[np.ndarray, np.ndarray, float] | None:
+        if mode == "shared":
+            return _linear_fit_at_exponents(observations, value, value)
+        if fixed_exponent is None:
+            raise ValueError(f"{mode} 搜索需要固定指数。")
+        if mode == "release_alpha":
+            return _linear_fit_at_exponents(observations, value, fixed_exponent)
+        if mode == "release_beta":
+            return _linear_fit_at_exponents(observations, fixed_exponent, value)
+        raise ValueError(f"未知的一维指数搜索模式：{mode}")
+
+    best: tuple[np.ndarray, np.ndarray, float] | None = None
+    for value in np.linspace(lower, upper, grid_size):
+        candidate = evaluate(float(value))
+        if candidate is not None and (best is None or candidate[2] < best[2]):
+            best = candidate
+    if best is None:
+        raise RuntimeError(f"{mode} 在给定指数范围内没有可行解。")
+
+    step = (upper - lower) / (grid_size - 1)
+    while step > tolerance:
+        parameters = best[0]
+        center = (
+            float(parameters[2])
+            if mode in {"shared", "release_alpha"}
+            else float(parameters[4])
+        )
+        improved = False
+        for value in (center - step, center + step):
+            if not lower <= value <= upper:
+                continue
+            candidate = evaluate(value)
+            if candidate is not None and candidate[2] < best[2] - 1e-18:
+                best = candidate
+                improved = True
+        if not improved:
+            step /= 2.0
+    return best[0], best[1]
+
+
 def fit_model(
     spec: ModelSpec,
     observations: Sequence[Observation],
     classic_parameters: np.ndarray,
+    shared_exponent: float | None = None,
+    exponent_lower: float = 0.01,
+    exponent_upper: float = 1.50,
+    grid_size: int = 31,
+    tolerance: float = 1e-7,
 ) -> tuple[np.ndarray, np.ndarray]:
-    n_value, d_value, actual = arrays(observations)
-    scale = max(float(np.std(actual)), 1e-8)
-    minimum_loss = float(np.min(actual))
-    loss_span = max(float(np.ptp(actual)), 0.1)
+    """按约束阶段拟合标准标度律，不改变模型函数形式。"""
 
-    classic_e, classic_a, classic_alpha, classic_b, classic_beta = (
-        classic_parameters
-    )
-    shared_exponent = float((classic_alpha + classic_beta) / 2.0)
-
-    if spec.name == "compute_only":
-        starts = [
-            np.asarray([0.8 * minimum_loss, loss_span, 0.20]),
-            np.asarray([0.5 * minimum_loss, loss_span, 0.35]),
-            np.asarray([classic_e, classic_a + classic_b, shared_exponent / 2]),
-        ]
-        lower = np.asarray([0.0, 0.0, 0.005])
-        upper = np.asarray([minimum_loss * 0.9999, 100.0, 2.0])
-    elif spec.name == "shared_exponent":
-        starts = [
-            np.asarray(
-                [classic_e, classic_a, classic_b, shared_exponent]
-            ),
-            np.asarray([0.8 * minimum_loss, 0.5, 1.0, 0.25]),
-            np.asarray([0.5 * minimum_loss, 1.0, 1.0, 0.5]),
-        ]
-        lower = np.asarray([0.0, 0.0, 0.0, 0.005])
-        upper = np.asarray([minimum_loss * 0.9999, 100.0, 100.0, 2.0])
-    elif spec.name == "classic":
-        # 使用可分离非线性最小二乘得到的稳定 B1 解，不重复数值优化。
+    n_value, d_value, _ = arrays(observations)
+    if spec.search_mode == "full":
         prediction = spec.predict(classic_parameters, n_value, d_value)
         return classic_parameters.copy(), prediction
-    else:
-        starts = [
-            np.asarray(
-                [
-                    classic_e,
-                    classic_a,
-                    classic_alpha,
-                    classic_b,
-                    classic_beta,
-                    interaction_coefficient,
-                    interaction_exponent,
-                ]
-            )
-            for interaction_coefficient in (1e-4, 0.02, 0.10)
-            for interaction_exponent in (0.10, 0.30, 0.60)
-        ]
-        lower = np.asarray([0.0, 0.0, 0.005, 0.0, 0.005, 0.0, 0.005])
-        upper = np.asarray(
-            [minimum_loss * 0.9999, 100.0, 2.0, 100.0, 2.0, 100.0, 2.0]
-        )
-
-    def residual(parameters: np.ndarray) -> np.ndarray:
-        return (spec.predict(parameters, n_value, d_value) - actual) / scale
-
-    best_parameters: np.ndarray | None = None
-    best_cost = math.inf
-    for start in starts:
-        clipped_start = np.minimum(np.maximum(start, lower + 1e-10), upper - 1e-10)
-        result = least_squares(
-            residual,
-            clipped_start,
-            bounds=(lower, upper),
-            method="trf",
-            max_nfev=5000,
-            xtol=1e-12,
-            ftol=1e-12,
-            gtol=1e-12,
-        )
-        cost = float(np.sum(np.square(residual(result.x))))
-        if result.success and cost < best_cost:
-            best_cost = cost
-            best_parameters = result.x
-
-    if best_parameters is None:
-        raise RuntimeError(f"{spec.name} 拟合失败。")
-    return best_parameters, spec.predict(best_parameters, n_value, d_value)
+    return _search_one_exponent(
+        observations=observations,
+        mode=spec.search_mode,
+        fixed_exponent=shared_exponent,
+        lower=exponent_lower,
+        upper=exponent_upper,
+        grid_size=grid_size,
+        tolerance=tolerance,
+    )
 
 
 def safe_rho(value: float) -> float:
@@ -255,19 +514,27 @@ def validation_score_from_arrays(
     actual: np.ndarray,
     predicted: np.ndarray,
     raw_mape_cap: float,
+    cluster_ids: Sequence[str] | None = None,
 ) -> dict[str, object]:
-    """计算跨数据源稳健分数；既保留尺度误差，也强调曲线形状。"""
+    """在交叉尺度归一化后计算跨来源验证分数。"""
 
     direct = calculate_metrics(actual, predicted)
     intercept, slope, shape_metrics = affine_recalibration(actual, predicted)
     target_std = max(float(np.std(actual)), 1e-12)
     shape_nrmse = shape_metrics.rmse / target_std
-    scale_component = min(direct.median_ape, raw_mape_cap)
+    normalization = cross_fitted_loss_normalization(
+        actual, predicted, cluster_ids=cluster_ids
+    )
+    normalized_metrics = normalization["normalized_metrics"]
+    assert isinstance(normalized_metrics, dict)
+    scale_component = min(float(normalized_metrics["median_ape"]), raw_mape_cap)
     rank_component = 1.0 - float(
-        np.clip(safe_rho(direct.spearman_rho), -1.0, 1.0)
+        np.clip(safe_rho(float(normalized_metrics["spearman_rho"])), -1.0, 1.0)
     )
     dataset_score = (
-        scale_component + 0.25 * shape_nrmse + 0.10 * rank_component
+        scale_component
+        + 0.25 * float(normalization["normalized_rmse_over_std"])
+        + 0.10 * rank_component
     )
     return {
         "direct_metrics": asdict(direct),
@@ -277,16 +544,20 @@ def validation_score_from_arrays(
             "metrics": asdict(shape_metrics),
             "normalized_rmse": shape_nrmse,
         },
+        "cross_fitted_scale_normalization": normalization,
         "score_components": {
-            "capped_median_ape": scale_component,
-            "affine_shape_nrmse": shape_nrmse,
-            "rank_penalty": rank_component,
+            "capped_normalized_median_ape": scale_component,
+            "cross_fitted_normalized_nrmse": normalization[
+                "normalized_rmse_over_std"
+            ],
+            "normalized_rank_penalty": rank_component,
         },
         "dataset_score": dataset_score,
     }
 
 
 def evaluate_validation_dataset(
+    dataset_name: str,
     spec: ModelSpec,
     parameters: np.ndarray,
     observations: Sequence[Observation],
@@ -294,7 +565,13 @@ def evaluate_validation_dataset(
 ) -> dict[str, object]:
     n_value, d_value, actual = arrays(observations)
     predicted = spec.predict(parameters, n_value, d_value)
-    result = validation_score_from_arrays(actual, predicted, raw_mape_cap)
+    cluster_ids = [
+        validation_cluster_id(dataset_name, observation)
+        for observation in observations
+    ]
+    result = validation_score_from_arrays(
+        actual, predicted, raw_mape_cap, cluster_ids=cluster_ids
+    )
     result["sample_count"] = len(observations)
     return result
 
@@ -370,8 +647,15 @@ def derive_adaptive_weights(
     for dataset_name, observations in validation_sets.items():
         n_value, d_value, actual = arrays(observations)
         predicted = classic_spec.predict(classic_parameters, n_value, d_value)
+        observation_clusters = [
+            validation_cluster_id(dataset_name, observation)
+            for observation in observations
+        ]
         reference = validation_score_from_arrays(
-            actual, predicted, raw_mape_cap
+            actual,
+            predicted,
+            raw_mape_cap,
+            cluster_ids=observation_clusters,
         )
         reference_score = float(reference["dataset_score"])
 
@@ -397,6 +681,10 @@ def derive_adaptive_weights(
                     actual[sampled_indices],
                     predicted[sampled_indices],
                     raw_mape_cap,
+                    cluster_ids=[
+                        observation_clusters[int(index)]
+                        for index in sampled_indices
+                    ],
                 )
                 bootstrap_scores.append(
                     float(bootstrap_result["dataset_score"])
@@ -442,16 +730,26 @@ def evaluate_candidate(
     raw_mape_cap: float,
     complexity_penalty_rate: float,
     minimum_b1_r_squared: float,
+    shared_exponent: float | None = None,
+    exponent_lower: float = 0.01,
+    exponent_upper: float = 1.50,
+    grid_size: int = 31,
 ) -> CandidateFit:
     parameters, b1_prediction = fit_model(
-        spec, b1_observations, classic_parameters
+        spec,
+        b1_observations,
+        classic_parameters,
+        shared_exponent=shared_exponent,
+        exponent_lower=exponent_lower,
+        exponent_upper=exponent_upper,
+        grid_size=grid_size,
     )
     b1_actual = observed_losses(b1_observations)
     b1_metrics_object = calculate_metrics(b1_actual, b1_prediction)
     b1_metrics = asdict(b1_metrics_object)
     validation = {
         dataset_name: evaluate_validation_dataset(
-            spec, parameters, observations, raw_mape_cap
+            dataset_name, spec, parameters, observations, raw_mape_cap
         )
         for dataset_name, observations in validation_sets.items()
     }
@@ -461,7 +759,7 @@ def evaluate_candidate(
     )
     # 每增加一个超出三参数基线的自由度都需给出可观测的验证收益。
     complexity_penalty = complexity_penalty_rate * max(
-        0, len(spec.parameter_names) - 3
+        0, spec.effective_parameter_count - 3
     )
     selection_score = validation_score + complexity_penalty
     eligible = b1_metrics_object.r_squared >= minimum_b1_r_squared
@@ -478,39 +776,112 @@ def evaluate_candidate(
     )
 
 
-def update_early_stopping_state(
-    candidate: CandidateFit,
-    best: CandidateFit | None,
-    bad_stage_count: int,
-    stage: int,
+def run_parameter_release_early_stopping(
+    b1_observations: Sequence[Observation],
+    validation_sets: dict[str, Sequence[Observation]],
+    classic_parameters: np.ndarray,
+    weights: dict[str, float],
+    raw_mape_cap: float,
+    complexity_penalty_rate: float,
+    minimum_b1_r_squared: float,
     patience: int,
     minimum_delta: float,
-) -> tuple[CandidateFit | None, int, int | None]:
-    """处理一个已完成的复杂度阶段，返回更新后的早停状态。"""
+    exponent_lower: float = 0.01,
+    exponent_upper: float = 1.50,
+    grid_size: int = 31,
+) -> tuple[list[CandidateFit], CandidateFit | None, int | None]:
+    """沿共享指数、单方向释放、完整二维搜索三层执行早停。
 
-    if not candidate.eligible:
-        candidate.bad_stage_count = bad_stage_count
-        return best, bad_stage_count, None
+    同一层的候选先全部完成主数据拟合，再以冻结权重的验证分数选出层内
+    最优者。验证数据不参与任何网格点的选择。
+    """
 
-    if best is None or candidate.selection_score < best.selection_score - minimum_delta:
-        best = candidate
-        candidate.improved = True
-        bad_stage_count = 0
-    else:
-        bad_stage_count += 1
-    candidate.bad_stage_count = bad_stage_count
+    specs = {spec.name: spec for spec in MODEL_PATH}
+    evaluated: list[CandidateFit] = []
+    best: CandidateFit | None = None
+    bad_layer_count = 0
+    stop_layer: int | None = None
 
-    if bad_stage_count >= patience:
-        candidate.stop_triggered = True
-        return best, bad_stage_count, stage
-    return best, bad_stage_count, None
+    shared = evaluate_candidate(
+        spec=specs["shared_exponent"],
+        b1_observations=b1_observations,
+        validation_sets=validation_sets,
+        classic_parameters=classic_parameters,
+        weights=weights,
+        raw_mape_cap=raw_mape_cap,
+        complexity_penalty_rate=complexity_penalty_rate,
+        minimum_b1_r_squared=minimum_b1_r_squared,
+        exponent_lower=exponent_lower,
+        exponent_upper=exponent_upper,
+        grid_size=grid_size,
+    )
+    evaluated.append(shared)
+    if shared.eligible:
+        shared.improved = True
+        best = shared
+    shared.bad_stage_count = bad_layer_count
+    anchor_exponent = float(shared.parameters[2])
+
+    layers = (
+        (
+            2,
+            (
+                specs["release_parameter_exponent"],
+                specs["release_data_exponent"],
+            ),
+        ),
+        (3, (specs["classic"],)),
+    )
+    for layer, layer_specs in layers:
+        layer_candidates = [
+            evaluate_candidate(
+                spec=spec,
+                b1_observations=b1_observations,
+                validation_sets=validation_sets,
+                classic_parameters=classic_parameters,
+                weights=weights,
+                raw_mape_cap=raw_mape_cap,
+                complexity_penalty_rate=complexity_penalty_rate,
+                minimum_b1_r_squared=minimum_b1_r_squared,
+                shared_exponent=anchor_exponent,
+                exponent_lower=exponent_lower,
+                exponent_upper=exponent_upper,
+                grid_size=grid_size,
+            )
+            for spec in layer_specs
+        ]
+        evaluated.extend(layer_candidates)
+        eligible = [candidate for candidate in layer_candidates if candidate.eligible]
+        layer_best = min(eligible, key=lambda item: item.selection_score) if eligible else None
+
+        if layer_best is not None and (
+            best is None
+            or layer_best.selection_score < best.selection_score - minimum_delta
+        ):
+            best = layer_best
+            layer_best.improved = True
+            bad_layer_count = 0
+        else:
+            bad_layer_count += 1
+
+        for candidate in layer_candidates:
+            candidate.bad_stage_count = bad_layer_count
+        if bad_layer_count >= patience:
+            if layer_best is not None:
+                layer_best.stop_triggered = True
+            stop_layer = layer
+            break
+
+    return evaluated, best, stop_layer
 
 
 def candidate_payload(candidate: CandidateFit) -> dict[str, object]:
     return {
         "model": candidate.spec.name,
         "description": candidate.spec.description,
-        "parameter_count": len(candidate.spec.parameter_names),
+        "parameter_count": candidate.spec.effective_parameter_count,
+        "constraint_layer": candidate.spec.layer,
+        "search_mode": candidate.spec.search_mode,
         "parameters": {
             name: float(value)
             for name, value in zip(
@@ -532,6 +903,8 @@ def candidate_payload(candidate: CandidateFit) -> dict[str, object]:
 def write_history_csv(path: Path, candidates: Sequence[CandidateFit]) -> None:
     fields = [
         "stage",
+        "constraint_layer",
+        "search_mode",
         "model",
         "parameter_count",
         "eligible",
@@ -551,6 +924,11 @@ def write_history_csv(path: Path, candidates: Sequence[CandidateFit]) -> None:
                 f"{dataset_name}_r_squared",
                 f"{dataset_name}_spearman_rho",
                 f"{dataset_name}_affine_shape_nrmse",
+                f"{dataset_name}_normalized_rmse",
+                f"{dataset_name}_normalized_median_ape",
+                f"{dataset_name}_normalized_r_squared",
+                f"{dataset_name}_normalized_spearman_rho",
+                f"{dataset_name}_normalization_fold_count",
                 f"{dataset_name}_score",
             ]
         )
@@ -561,8 +939,10 @@ def write_history_csv(path: Path, candidates: Sequence[CandidateFit]) -> None:
         for stage, candidate in enumerate(candidates, start=1):
             row: dict[str, object] = {
                 "stage": stage,
+                "constraint_layer": candidate.spec.layer,
+                "search_mode": candidate.spec.search_mode,
                 "model": candidate.spec.name,
-                "parameter_count": len(candidate.spec.parameter_names),
+                "parameter_count": candidate.spec.effective_parameter_count,
                 "eligible": candidate.eligible,
                 "improved": candidate.improved,
                 "stop_triggered": candidate.stop_triggered,
@@ -576,11 +956,26 @@ def write_history_csv(path: Path, candidates: Sequence[CandidateFit]) -> None:
             for dataset_name, result in candidate.validation.items():
                 direct = result["direct_metrics"]
                 shape = result["affine_shape_diagnostic"]
+                normalization = result["cross_fitted_scale_normalization"]
+                normalized = normalization["normalized_metrics"]
                 row[f"{dataset_name}_median_ape"] = direct["median_ape"]
                 row[f"{dataset_name}_r_squared"] = direct["r_squared"]
                 row[f"{dataset_name}_spearman_rho"] = direct["spearman_rho"]
                 row[f"{dataset_name}_affine_shape_nrmse"] = shape[
                     "normalized_rmse"
+                ]
+                row[f"{dataset_name}_normalized_rmse"] = normalized["rmse"]
+                row[f"{dataset_name}_normalized_median_ape"] = normalized[
+                    "median_ape"
+                ]
+                row[f"{dataset_name}_normalized_r_squared"] = normalized[
+                    "r_squared"
+                ]
+                row[f"{dataset_name}_normalized_spearman_rho"] = normalized[
+                    "spearman_rho"
+                ]
+                row[f"{dataset_name}_normalization_fold_count"] = normalization[
+                    "fold_count"
                 ]
                 row[f"{dataset_name}_score"] = result["dataset_score"]
             writer.writerow(row)
@@ -666,7 +1061,7 @@ def write_report(
         "",
         "## 结论",
         "",
-        f"- 选中模型：`{chosen.spec.name}`（{len(chosen.spec.parameter_names)} 个参数）。",
+        f"- 选中约束结构：`{chosen.spec.name}`（有效参数数 {chosen.spec.effective_parameter_count}）。",
         f"- B1 拟合：R²={chosen.b1_metrics['r_squared']:.6f}，RMSE={chosen.b1_metrics['rmse']:.6g}。",
         f"- 验证综合分数：{chosen.validation_score:.6f}；含复杂度惩罚后的选模分数：{chosen.selection_score:.6f}。",
         (
@@ -678,10 +1073,14 @@ def write_report(
         "## 策略",
         "",
         "- 所有候选模型只在 B1 上估计参数；B2、B3、B4、B5 不参与参数拟合。",
+        "- B2 按 run_id 分组，仅保留最大训练步（并以最大 Token 数判定并列）的最终收敛 checkpoint。",
+        "- 模型形式始终为 `L=E+A*N^(-alpha)+B*D^(-beta)`；固定指数后以线性最小二乘拟合 E、A、B。",
+        "- 指数释放顺序为：共享指数一维搜索 → alpha/beta 单方向并行释放 → alpha-beta 完整二维搜索。",
+        "- 不同来源的 Loss 先通过留一轨迹/模型族仿射校准映射到 B1 参考尺度，再计算用于早停的验证分数。",
         f"- B1 准入门槛：R² ≥ {args.min_b1_r2:.4f}。",
         f"- 验证分数至少改善 {args.min_delta:.4g} 才计为有效改善；耐心值为 {args.patience} 个复杂度阶段。",
-        "- 单数据集分数 = 截断后的中位相对误差 + 0.25×仿射校准后 NRMSE + 0.10×排序惩罚。",
-        f"- 直接误差截断上限为 {args.raw_mape_cap:.1%}，用于减弱不同 Loss 口径造成的整体偏移。",
+        "- 单数据集分数 = 截断后的交叉归一化中位相对误差 + 0.25×交叉归一化 NRMSE + 0.10×归一化排序惩罚。",
+        f"- 归一化相对误差截断上限为 {args.raw_mape_cap:.1%}，用于限制单一来源对综合分数的支配。",
         (
             "- 权重模式：自适应；权重由经典模型的验证难度、簇重采样稳定性和数据可信度先验共同确定，确定后在候选路径中冻结。"
             if args.weight_mode == "adaptive"
@@ -723,17 +1122,17 @@ def write_report(
         "",
         "## 复杂度路径",
         "",
-        "| 阶段 | 模型 | 参数数 | B1 R² | 验证分数 | 选模分数 | 改善 | 早停 |",
+        "| 约束层 | 候选结构 | 有效参数数 | B1 R² | 验证分数 | 选模分数 | 改善 | 早停 |",
         "|---:|---|---:|---:|---:|---:|---|---|",
         ]
     )
-    for stage, candidate in enumerate(evaluated, start=1):
+    for candidate in evaluated:
         lines.append(
             "| {stage} | {name} | {count} | {r2:.6f} | {validation:.6f} | "
             "{selection:.6f} | {improved} | {stopped} |".format(
-                stage=stage,
+                stage=candidate.spec.layer,
                 name=candidate.spec.name,
-                count=len(candidate.spec.parameter_names),
+                count=candidate.spec.effective_parameter_count,
                 r2=candidate.b1_metrics["r_squared"],
                 validation=candidate.validation_score,
                 selection=candidate.selection_score,
@@ -744,9 +1143,27 @@ def write_report(
     lines.extend(
         [
             "",
+            "## 选中结构的尺度归一化验证",
+            "",
+            "| 数据集 | 原始 RMSE | 归一化 RMSE | 归一化中位相对误差 | 归一化 Spearman | 校准折数 |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for dataset_name, result in chosen.validation.items():
+        direct = result["direct_metrics"]
+        normalization = result["cross_fitted_scale_normalization"]
+        normalized = normalization["normalized_metrics"]
+        lines.append(
+            f"| {dataset_name} | {direct['rmse']:.6f} | "
+            f"{normalized['rmse']:.6f} | {normalized['median_ape']:.2%} | "
+            f"{normalized['spearman_rho']:.4f} | {normalization['fold_count']} |"
+        )
+    lines.extend(
+        [
+            "",
             "## 解释限制",
             "",
-            "B2 的直接误差同时包含模型族与 Loss 标尺迁移，不能单凭 B2 的负 R² 判定 B1 过拟合；应结合仿射校准后的曲线形状误差和 Spearman 排序相关。B3 是从 B1 检查点插值得到的连续轨迹，不是独立外部验证。B4、B5 更适合判断跨族趋势，但同样存在训练语料、分词器和评测口径差异。",
+            "B2 仅使用各运行的最终收敛 checkpoint，其直接误差仍同时包含模型族与 Loss 标尺迁移，不能单凭负 R² 判定 B1 过拟合；应结合交叉尺度归一化误差和 Spearman 排序相关。B3 是从 B1 检查点插值得到的连续轨迹，不是独立外部验证。B4、B5 更适合判断跨族趋势，但同样存在训练语料、分词器和评测口径差异。",
             "",
             "本策略按用户要求让 B5 参与早停，因此 B5 已成为模型选择数据，不能再作为完全独立的最终测试集。正式论文若需要无偏泛化估计，应另留一组文献数据，或采用按模型族分组的嵌套交叉验证。",
             "",
@@ -757,7 +1174,9 @@ def write_report(
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="只用 B1 拟合，并基于 B2--B5 验证表现执行结构早停。"
+        description=(
+            "保持标准五参数标度律不变，沿指数参数释放路径执行结构早停。"
+        )
     )
     parser.add_argument("--b-dir", type=Path, default=DEFAULT_B_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -808,7 +1227,9 @@ def main() -> int:
     )
     validation_sets: dict[str, Sequence[Observation]] = {
         "B2": load_classic_observations(
-            b_dir / "cerebras_training_log.csv", row_id_column="run_id"
+            b_dir / "cerebras_training_log.csv",
+            row_id_column="run_id",
+            final_checkpoint_only=True,
         ),
         "B3": load_b3_observations(b_dir),
         "B4": load_classic_observations(
@@ -875,32 +1296,20 @@ def main() -> int:
                 "normalized_weight": weights[dataset_name],
             }
 
-    evaluated: list[CandidateFit] = []
-    chosen: CandidateFit | None = None
-    bad_stage_count = 0
-    stop_stage: int | None = None
-    for stage, spec in enumerate(MODEL_PATH, start=1):
-        candidate = evaluate_candidate(
-            spec=spec,
-            b1_observations=b1_observations,
-            validation_sets=validation_sets,
-            classic_parameters=classic_parameters,
-            weights=weights,
-            raw_mape_cap=args.raw_mape_cap,
-            complexity_penalty_rate=args.complexity_penalty,
-            minimum_b1_r_squared=args.min_b1_r2,
-        )
-        evaluated.append(candidate)
-        chosen, bad_stage_count, stop_stage = update_early_stopping_state(
-            candidate=candidate,
-            best=chosen,
-            bad_stage_count=bad_stage_count,
-            stage=stage,
-            patience=args.patience,
-            minimum_delta=args.min_delta,
-        )
-        if stop_stage is not None:
-            break
+    evaluated, chosen, stop_stage = run_parameter_release_early_stopping(
+        b1_observations=b1_observations,
+        validation_sets=validation_sets,
+        classic_parameters=classic_parameters,
+        weights=weights,
+        raw_mape_cap=args.raw_mape_cap,
+        complexity_penalty_rate=args.complexity_penalty,
+        minimum_b1_r_squared=args.min_b1_r2,
+        patience=args.patience,
+        minimum_delta=args.min_delta,
+        exponent_lower=0.01,
+        exponent_upper=1.50,
+        grid_size=args.grid_size,
+    )
 
     if chosen is None:
         raise RuntimeError(
@@ -908,9 +1317,19 @@ def main() -> int:
         )
 
     results = {
-        "method": "B1-only fitting with B2-B5 structural early stopping",
+        "method": (
+            "standard scaling law with separable nonlinear least squares "
+            "and exponent-release early stopping"
+        ),
         "model_path": [spec.name for spec in MODEL_PATH],
         "settings": {
+            "loss_scale_normalization": {
+                "reference_scale": "B1 identity scale",
+                "external_transform": "(L_source - intercept) / slope",
+                "calibration": "leave-one-trajectory-or-family-out",
+                "selection_uses_normalized_metrics": True,
+                "raw_metrics_retained": True,
+            },
             "weights": weights,
             "weight_mode": args.weight_mode,
             "adaptive_weight_diagnostics": weight_diagnostics,
@@ -934,7 +1353,7 @@ def main() -> int:
             "complexity_penalty_per_extra_parameter": args.complexity_penalty,
             "dataset_roles": {
                 "B1": "parameter fitting only",
-                "B2": "semi-synthetic cross-family trajectory selection",
+                "B2": "final converged checkpoint per run for cross-family selection",
                 "B3": "B1-derived interpolation continuity selection; low weight",
                 "B4": "cross-family model selection",
                 "B5": "published-data model selection; not an independent test after use",
