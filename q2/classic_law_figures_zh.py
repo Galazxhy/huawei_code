@@ -34,13 +34,13 @@
 
 两张四联图面板已拆成独立单图，画布与其余单图一致（均为 6×4）。
 
-中文字形由脚本自带的子集字体提供（``assets/NotoSansSC-Regular-subset.otf`` 与
-``...-Bold-subset.otf``，合计约 0.3 MB，启动时自动注册进 matplotlib），因此
-本机无需预装中文字体。两个字重都注册，加粗标题才不会静默降级为常规体。
+中文字形的来源按顺序回退：先找脚本自带的子集字体（``q2/assets/`` 下的
+``NotoSansSC-{Regular,Bold}-subset.otf``），没有则用仓库统一的
+``.fontwork/NotoSansCJKsc-Regular.otf``，再不行才找系统里装的中文字体。
+自带子集已随仓库清理，因此当前实际用的是 ``.fontwork`` 那份——它只有 Regular
+一个字重，加粗中文会按常规体渲染（matplotlib 会打印 findfont 提示，属预期）。
 
-子集只覆盖**当前文案用到的字形**：改动图内文字后若新增了汉字，脚本会在启动时
-报错并列出缺失字形，而不是画出一堆方框。此时重跑
-``python3 q2/figure_font_subset.py`` 重新生成子集即可。
+当前字体缺字形时脚本会在启动时报错并列出缺失字符，而不是画出一堆方框。
 
 用法::
 
@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
@@ -65,8 +66,9 @@ from matplotlib.colors import LogNorm
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import classic_law_figures_en as base  # noqa: E402
+# 原来这里 `import classic_law_figures_en as base`：那份英文图件脚本已从仓库清理，
+# 本文件把它的**数据访问层**内联在下面（见「数据访问层」一节），接口同名，
+# 因此上层画图代码一行都不用改。
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +81,13 @@ BUNDLED_FONTS = (
     Path(__file__).resolve().parent / "assets" / "NotoSansSC-Regular-subset.otf",
     Path(__file__).resolve().parent / "assets" / "NotoSansSC-Bold-subset.otf",
 )
+# 仓库统一的中文字体（`.fontwork/` 下，由 generalized_law_figures.chinese_family 使用）。
+# 自带子集字体随 `q2/assets/` 一起清理后，中文靠它渲染；两个字重的子集在时优先用子集。
+FALLBACK_FONTS = (
+    Path(__file__).resolve().parents[1] / ".fontwork" / "NotoSansCJKsc-Regular.otf",
+)
+# 实际参与渲染的字体路径（用于字形覆盖检查）。
+FONT_PATHS = BUNDLED_FONTS + FALLBACK_FONTS
 DEFAULT_RESULT_DIR = (
     PROJECT_ROOT / "data_analysis" / "traditional_scaling_law"
 )
@@ -121,21 +130,34 @@ def configure_chinese() -> tuple[str, bool]:
     才退化为 DejaVu，并在调用方打印警告。
     """
 
-    registered = 0
+    bundled = 0
     bundled_name: str | None = None
     for font_path in BUNDLED_FONTS:
         if not font_path.exists():
             continue
         font_manager.fontManager.addfont(str(font_path))
-        registered += 1
+        bundled += 1
         if bundled_name is None:
             bundled_name = font_manager.FontProperties(fname=str(font_path)).get_name()
     # 只带 Regular 时加粗中文会被静默降级，图上的层级就没了——明确报出来。
-    if registered == 1:
+    # 注意只在「用了自带子集」时提示：改走仓库统一字体时本来就只有 Regular 一个字重。
+    if bundled == 1:
         print(
             "警告：只找到 1 个字重的自带字体，加粗中文将降级为常规体。\n"
             "      请运行 python3 q2/figure_font_subset.py 生成两个字重。",
             file=sys.stderr)
+    if bundled == 0:
+        for font_path in FALLBACK_FONTS:
+            if not font_path.exists():
+                continue
+            font_manager.fontManager.addfont(str(font_path))
+            bundled_name = font_manager.FontProperties(
+                fname=str(font_path)).get_name()
+            print(
+                f"提示：自带子集字体不在，改用仓库字体 {font_path.name}"
+                "（只有 Regular 一个字重，加粗中文按常规体渲染）。",
+                file=sys.stderr)
+            break
 
     available = {item.name for item in font_manager.fontManager.ttflist}
     matched = bundled_name if bundled_name in available else None
@@ -257,11 +279,16 @@ def assert_glyphs_available(font_paths: tuple[Path, ...]) -> None:
 
     from fontTools.ttLib import TTFont
 
-    # 与生成脚本共用同一份「运行时符号」集合，避免两边口径不一致导致漏字形。
-    import figure_font_subset as font_builder
+    # 生成脚本（q2/figure_font_subset.py）已随 q2/assets 一起清理，运行时符号表因此
+    # 取不到了；下面直接扫本文件的字符串字面量，覆盖面比原表更全（含注释外的全部文案）。
+    try:
+        import figure_font_subset as font_builder
+
+        needed: set[str] = set(font_builder.RUNTIME_SYMBOLS)
+    except ImportError:
+        needed = set()
 
     source = Path(__file__).read_text(encoding="utf-8")
-    needed: set[str] = set(font_builder.RUNTIME_SYMBOLS)
     for node in _ast.walk(_ast.parse(source)):
         if isinstance(node, _ast.Constant) and isinstance(node.value, str):
             needed.update(node.value)
@@ -328,6 +355,276 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
         raise FileNotFoundError(f"找不到结果文件：{path}")
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+# --------------------------------------------------------------------------- #
+# 数据访问层：内联原来 `classic_law_figures_en` 里被本文件用到的部分
+#
+# 全部来源都是仓库里现成的产物文件，不重新拟合、不新增中间数据：
+#   B1 / B2 训练日志
+#       data/real_attachments/B_scaling_laws/{pythia_training_log_existing,
+#                                             cerebras_training_log}.csv
+#   经典标度律拟合参数
+#       data_analysis/traditional_scaling_law/traditional_scaling_fit.json
+#   经典律残差点
+#       data_analysis/traditional_scaling_law/traditional_scaling_predictions.csv
+#   早停历史 / 跨族验证点 / 验证指标
+#       data_analysis/scaling_law_full/{early_stopping_history,
+#           early_stopping_predictions,classic_validation_metrics}.csv
+#       data_analysis/scaling_law_full/scaling_law_full_results.json
+# --------------------------------------------------------------------------- #
+# 配色取自旧版英文脚本的实际输出（从已生成的 PNG 反解，含各自的 alpha）：
+# B2/B3/B4 属 Okabe-Ito 色盲友好色系，B5 用紫色；B1 沿用仓库里 B1 的常用蓝。
+_DATASET_COLORS = {
+    "B1": "#4C78A8",
+    "B2": "#D55E00",
+    "B3": "#009E73",
+    "B4": "#0072B2",
+    "B5": "#7A5195",
+}
+# 「未达门槛 / 不通过」的告警红，同样从旧图反解。
+WARN_COLOR = "#B03A2E"
+
+
+@dataclass(frozen=True)
+class TrainingLog:
+    """一份训练日志：每个检查点一行，含参数量、累计计算量与各损失列。"""
+
+    n_params_b: np.ndarray
+    d_tokens_b: np.ndarray
+    flops_1e21: np.ndarray
+    columns: dict[str, np.ndarray]
+
+    def loss(self, name: str = "val_loss") -> np.ndarray:
+        if name not in self.columns:
+            raise KeyError(f"训练日志里没有损失列 {name!r}；可用列：{sorted(self.columns)}")
+        return self.columns[name]
+
+
+def load_training_log(path: Path) -> TrainingLog:
+    """读训练日志；累计计算量缺列时按 ``C = 6ND`` 现算。"""
+
+    rows = _read_csv_rows(path)
+    if not rows:
+        raise ValueError(f"训练日志为空：{path}")
+    columns = {
+        key: np.asarray([float(row[key]) for row in rows])
+        for key in rows[0]
+        if key != "run_id" and _is_number(row_value=rows[0][key])
+    }
+    n_params_b = columns["N_params_B"]
+    d_tokens_b = columns["D_tokens_B"]
+    if "C_FLOPs_1e21" in columns:
+        flops = columns["C_FLOPs_1e21"]
+    else:
+        flops = 6.0 * n_params_b * d_tokens_b / 1e3  # (B 参数 × B token) → 1e21 FLOPs
+    return TrainingLog(n_params_b=n_params_b, d_tokens_b=d_tokens_b,
+                       flops_1e21=flops, columns=columns)
+
+
+def _is_number(row_value: str) -> bool:
+    try:
+        float(row_value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class LossPredictions:
+    """经典律在观测点上的预测与实测（用于四联图 (a)(b)）。"""
+
+    n_params_b: np.ndarray
+    d_tokens_b: np.ndarray
+    actual_loss: np.ndarray
+
+
+def load_predictions(path: Path) -> LossPredictions:
+    rows = _read_csv_rows(path)
+    return LossPredictions(
+        n_params_b=np.asarray([float(r["N_params_B"]) for r in rows]),
+        d_tokens_b=np.asarray([float(r["D_tokens_B"]) for r in rows]),
+        actual_loss=np.asarray([float(r["actual_loss"]) for r in rows]),
+    )
+
+
+class ClassicParameters:
+    """经典标度律 ``L = E + A·N^(−α) + B·D^(−β)``（参数来自拟合结果文件）。"""
+
+    def __init__(self, payload: dict[str, float]) -> None:
+        self.irreducible_loss = float(payload["irreducible_loss"])
+        self.parameter_coefficient = float(payload["parameter_coefficient"])
+        self.parameter_exponent = float(payload["parameter_exponent"])
+        self.data_coefficient = float(payload["data_coefficient"])
+        self.data_exponent = float(payload["data_exponent"])
+
+    def predict(self, n_params_b, d_tokens_b) -> np.ndarray:
+        n = np.asarray(n_params_b, dtype=float)
+        d = np.asarray(d_tokens_b, dtype=float)
+        return (self.irreducible_loss
+                + self.parameter_coefficient * np.power(n, -self.parameter_exponent)
+                + self.data_coefficient * np.power(d, -self.data_exponent))
+
+
+def load_fit_result(path: Path) -> tuple[ClassicParameters, dict]:
+    """返回 ``(参数对象, 拟合指标)``。"""
+
+    import json
+
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return ClassicParameters(payload["parameters"]), dict(payload.get("metrics", {}))
+
+
+@dataclass(frozen=True)
+class DatasetPrediction:
+    predicted: np.ndarray
+    actual: np.ndarray
+
+
+@dataclass(frozen=True)
+class NormalizationRecord:
+    """某个外部数据集相对 B1 尺度的仿射归一化记录。"""
+
+    affine_intercept: float
+    affine_slope: float
+    raw_mape: float
+    normalized_mape: float
+
+
+class FullAnalysis:
+    """``scaling_law_full`` 目录的读取封装（早停历史 + 跨族验证）。"""
+
+    def __init__(self, directory: Path) -> None:
+        import json
+
+        directory = Path(directory)
+        self.directory = directory
+        self.payload = json.loads(
+            (directory / "scaling_law_full_results.json").read_text(encoding="utf-8"))
+        self.history = _read_csv_rows(directory / "early_stopping_history.csv")
+        rows = _read_csv_rows(directory / "early_stopping_predictions.csv")
+        self.datasets = list(dict.fromkeys(row["dataset"] for row in rows))
+        self.predictions = {
+            name: DatasetPrediction(
+                predicted=np.asarray([float(r["predicted_loss"]) for r in rows
+                                      if r["dataset"] == name]),
+                actual=np.asarray([float(r["actual_loss"]) for r in rows
+                                   if r["dataset"] == name]))
+            for name in self.datasets}
+        self._validations = {
+            item["dataset"]: item
+            for item in self.payload.get("classic_validations", [])}
+        self._affine = {
+            name: item.get("affine_scale_diagnostic", {})
+            for name, item in self._validations.items()}
+
+    def normalized_for(self, name: str) -> NormalizationRecord:
+        """某个数据集的仿射归一化记录。
+
+        ``raw_mape`` / ``normalized_mape`` 两个字段名沿用原英文接口，但取的是
+        **中位相对误差（median APE）**：直接迁移取 ``b1_direct_transfer_metrics``，
+        归一化后取 ``cross_fitted_scale_normalized_validation.normalized_metrics``
+        （留一簇交叉拟合）。图例里的百分比就是后者。
+        """
+
+        item = self._validations.get(name, {})
+        affine = self._affine.get(name, {})
+        raw = item.get("b1_direct_transfer_metrics", {})
+        normalized = item.get("cross_fitted_scale_normalized_validation", {}) \
+            .get("normalized_metrics", {})
+        return NormalizationRecord(
+            affine_intercept=float(affine.get("intercept", 0.0)),
+            affine_slope=float(affine.get("slope", 1.0)),
+            raw_mape=float(raw.get("median_ape", float("nan"))),
+            normalized_mape=float(normalized.get("median_ape", float("nan"))),
+        )
+
+
+def load_full_analysis(directory: Path) -> FullAnalysis:
+    return FullAnalysis(directory)
+
+
+def _format_size(value: float) -> str:
+    """参数量（单位 B）的短标签：``0.071 → 71M``、``1.041 → 1B``、``12 → 12B``。"""
+
+    if value < 1.0:
+        return f"{value * 1000:.0f}M"
+    if value < 10.0:
+        return f"{value:.1f}B".replace(".0B", "B")
+    return f"{value:.0f}B"
+
+
+def _format_location(value: float) -> str:
+    """数据量（单位 B）的短标签：``1630 → 1.63T``、``300 → 300B``。"""
+
+    if value >= 1000.0:
+        return f"{value / 1000:.2f}T"
+    if value >= 10.0:
+        return f"{value:.0f}B"
+    if value >= 1.0:
+        return f"{value:.1f}B".replace(".0B", "B")
+    return f"{value * 1000:.0f}M"
+
+
+def _display_subsample(x_values: np.ndarray, y_values: np.ndarray,
+                       cap: int) -> tuple[np.ndarray, np.ndarray]:
+    """点数超过 ``cap`` 时等距抽稀（保留首尾），点太密时散点会糊成一片。"""
+
+    x = np.asarray(x_values, dtype=float)
+    y = np.asarray(y_values, dtype=float)
+    if x.size <= cap or cap <= 1:
+        return x, y
+    index = np.unique(np.linspace(0, x.size - 1, int(cap)).round().astype(int))
+    return x[index], y[index]
+
+
+def _nearest_observations_at_d(data: LossPredictions, d_value: float,
+                               unique_n: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """每个模型规模上取训练 token 数最接近 ``d_value`` 的观测点。"""
+
+    observed_n: list[float] = []
+    observed_loss: list[float] = []
+    for n_value in unique_n:
+        mask = np.isclose(data.n_params_b, n_value, rtol=0.0, atol=1e-12)
+        if not np.any(mask):
+            continue
+        d_here = data.d_tokens_b[mask]
+        index = int(np.argmin(np.abs(d_here - d_value)))
+        observed_n.append(float(n_value))
+        observed_loss.append(float(data.actual_loss[mask][index]))
+    return np.asarray(observed_n), np.asarray(observed_loss)
+
+
+class _DataAccess:
+    """内联的 ``classic_law_figures_en`` 命名空间（只含本文件用到的部分）。"""
+
+    WARN_COLOR = WARN_COLOR
+    DATASET_COLORS = _DATASET_COLORS
+    TrainingLog = TrainingLog
+    FULL_DIR = Path(__file__).resolve().parents[1] / "data_analysis" / "scaling_law_full"
+    DEFAULT_TRAINING_LOG = (Path(__file__).resolve().parents[1] / "data" /
+                            "real_attachments" / "B_scaling_laws" /
+                            "pythia_training_log_existing.csv")
+    DEFAULT_B2_TRAINING_LOG = (Path(__file__).resolve().parents[1] / "data" /
+                               "real_attachments" / "B_scaling_laws" /
+                               "cerebras_training_log.csv")
+    DEFAULT_FIT_JSON = (Path(__file__).resolve().parents[1] / "data_analysis" /
+                        "traditional_scaling_law" / "traditional_scaling_fit.json")
+    DEFAULT_PREDICTIONS = (Path(__file__).resolve().parents[1] / "data_analysis" /
+                           "traditional_scaling_law" /
+                           "traditional_scaling_predictions.csv")
+
+    load_training_log = staticmethod(load_training_log)
+    load_predictions = staticmethod(load_predictions)
+    load_fit_result = staticmethod(load_fit_result)
+    load_full_analysis = staticmethod(load_full_analysis)
+    _format_size = staticmethod(_format_size)
+    _format_location = staticmethod(_format_location)
+    _display_subsample = staticmethod(_display_subsample)
+    _nearest_observations_at_d = staticmethod(_nearest_observations_at_d)
+
+
+base = _DataAccess()
 
 
 # --------------------------------------------------------------------------- #
@@ -975,7 +1272,7 @@ def main() -> int:
             file=sys.stderr)
     else:
         # 自带的子集字体只覆盖生成时的文案，改动文字后先查字形再开画。
-        assert_glyphs_available(BUNDLED_FONTS)
+        assert_glyphs_available(FONT_PATHS)
 
     outputs: list[Path] = []
     for name in names:
