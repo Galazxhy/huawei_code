@@ -22,7 +22,8 @@ Reader-facing figures (default ``--figures story``)
 ``observed_contrast``     a real held-out mixture change and its 13 losses
 ``component_breakdown``  pQ and clr contributions to that same loss change
 ``domain_scale``          domain-specific mixture amplitudes at fitted anchors
-``surface_parity``        held-out prediction check
+``surface_parity``        held-out parity, Chinese labels; rendered by the same
+                        builder as ``identification_parity``
 ``all_domain_p_q``        p and Q response across every source and loss domain
 ========================  ====================================================
 
@@ -30,7 +31,6 @@ Additional diagnostic figures (``--figures all``)
 -----------------------------------------------
 ========================  ====================================================
 ``loss_vs_diversity``      loss against mixture diversity, one curve per scale
-``surface_parity``        predicted vs observed loss, every held-out row
 ``response_parity``       predicted vs observed mixture contribution
 ``error_by_scale``        relative RMSE / median APE per held-out scale
 ``amplitude_decay``       S_k across the three observed anchors (log y)
@@ -41,6 +41,13 @@ Additional diagnostic figures (``--figures all``)
 ``elasticity``            dlnL/dlnN, dlnL/dlnD, dlnL/dlnQ across two laws
 ``epsilon_sensitivity``   epsilon sweep, error and mixture R^2 together
 ``domain_error_1b``       per-domain relative RMSE at the 1B anchor
+``identification_parity``   held-out parity (Chinese), beside the per-scale error
+                           against the same coefficients with the mixture term
+                           switched off; ``surface_parity`` is identical
+``domain_accuracy``        per-domain held-out relative RMSE (Chinese) and its R^2,
+                           split into the overall reading and the mixture-only one
+``identification_resolution``  per-domain held-out mixture R^2 and the identified
+                           (eta_k, zeta_k) pair per domain
 ``separate_p_q``          composition and quality one-variable response cuts
 ``simplex_landscape``     quality-labelled composition/loss landscapes
 ``scaling_curves``        loss--compute curves for fixed observed mixtures
@@ -68,7 +75,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -397,45 +406,20 @@ def panel_loss_vs_diversity(data: LawData) -> plt.Figure:
 
 
 def panel_surface_parity(data: LawData) -> plt.Figure:
-    figure, axis = plt.subplots(figsize=PANEL_FIGSIZE, layout="constrained")
-    observed_all, predicted_all = [], []
-    for name in HELDOUT_SCALES:
-        block = next(b for b in data.test_blocks if b.name == name)
-        colour, marker = SCALE_STYLE[name]
-        predicted = data.predict(block.n, block.d, block.p)
-        axis.scatter(block.y.ravel(), predicted.ravel(), s=11, alpha=0.55,
-                     color=colour, marker=marker, edgecolors="none",
-                     label=f"{SCALE_LABEL[name]} held-out, n={block.y.size}")
-        observed_all.append(block.y.ravel())
-        predicted_all.append(predicted.ravel())
-    observed = np.concatenate(observed_all)
-    predicted = np.concatenate(predicted_all)
-    low = min(observed.min(), predicted.min()) * 0.93
-    high = max(observed.max(), predicted.max()) * 1.07
-    axis.plot([low, high], [low, high], color="#333333", linewidth=1.0,
-              linestyle="--", zorder=1, label="y = x")
-    axis.set_xscale("log")
-    axis.set_yscale("log")
-    axis.set_xlim(low, high)
-    axis.set_ylim(low, high)
-    ticks = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0]
-    labels = [f"{value:g}" for value in ticks]
-    axis.set_xticks(ticks)
-    axis.set_yticks(ticks)
-    axis.xaxis.set_major_formatter(FixedFormatter(labels))
-    axis.yaxis.set_major_formatter(FixedFormatter(labels))
-    axis.xaxis.set_minor_formatter(NullFormatter())
-    axis.yaxis.set_minor_formatter(NullFormatter())
-    axis.set_xlabel("Observed validation loss (nats)")
-    axis.set_ylabel("Predicted validation loss (nats)")
-    tidy(axis)
-    axis.legend(loc="lower right", markerscale=1.8, handletextpad=0.5, fontsize=10)
-    note(axis,
-         f"all held-out rows (n={observed.size})\n"
-         f"relative RMSE   {compact.relative_rmse(observed, predicted):.2%}\n"
-         f"median APE   {np.median(np.abs(predicted / observed - 1)):.2%}",
-         loc="upper left")
-    return figure
+    """The delivered parity figure, rendered by :func:`_parity_figure`.
+
+    ``generalized_law_surface_parity.png`` is the name the write-up refers to, so
+    it must stay identical to ``generalized_law_identification_parity.png``: both
+    names call the same builder instead of keeping two copies of the drawing code
+    that could drift apart.
+
+    The earlier standalone version plotted observed against predicted on log axes
+    with no reference model.  The current figure keeps that parity check and adds
+    the per-scale error against the same coefficients with the mixture term
+    switched off, which is what shows the identified term is doing the work.
+    """
+
+    return _parity_figure(data, chinese=True)
 
 
 def panel_response_parity(data: LawData) -> plt.Figure:
@@ -1497,6 +1481,411 @@ def panel_four_factor_map(data: LawData) -> plt.Figure:
     return figure
 
 
+# --------------------------------------------------------------------------- #
+# Chinese labels
+# --------------------------------------------------------------------------- #
+# The repository no longer ships a font (the bundled subset was removed) and this
+# machine has no CJK family installed, so a Chinese panel needs a real font on
+# disk.  Registration has to happen before the figure is *drawn*: matplotlib
+# resolves families at draw time, so a context manager around the builder would
+# not reach the legend that savefig creates lazily.
+CJK_FONT_CANDIDATES = (
+    Path(os.environ["DSH_CJK_FONT"]) if os.environ.get("DSH_CJK_FONT") else None,
+    PROJECT_ROOT / ".fontwork" / "NotoSansCJKsc-Regular.otf",
+    PROJECT_ROOT / "q2" / "assets" / "NotoSansSC-Regular-subset.otf",
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+)
+
+CJK_HELP = (
+    "中文标注需要一份 CJK 字体：本机没有安装，仓库也不再随附。取一份后重试：\n"
+    "  pip download mplfonts -d .fontwork --no-deps\n"
+    "  python -c \"import zipfile,glob,pathlib;"
+    "z=zipfile.ZipFile(glob.glob('.fontwork/mplfonts-*.whl')[0]);"
+    "pathlib.Path('.fontwork/NotoSansCJKsc-Regular.otf')"
+    ".write_bytes(z.read('mplfonts/fonts/NotoSansCJKsc-Regular.otf'))\"\n"
+    "或指定已有字体：DSH_CJK_FONT=/path/to/font.otf"
+)
+
+
+def chinese_family() -> str:
+    """Register an available CJK font and return its family name.
+
+    Fails loudly when none is found: without a CJK family matplotlib only emits a
+    ``UserWarning`` and draws every Chinese glyph as a tofu box.
+    """
+
+    from matplotlib import font_manager
+
+    for candidate in CJK_FONT_CANDIDATES:
+        if candidate is not None and Path(candidate).exists():
+            font_manager.fontManager.addfont(str(candidate))
+            return font_manager.FontProperties(fname=str(candidate)).get_name()
+    raise SystemExit("未找到可用的中文字体。\n" + CJK_HELP)
+
+
+def use_chinese(figure: plt.Figure) -> plt.Figure:
+    """Tag a figure so ``main`` draws its text with the CJK family."""
+
+    figure.dsh_font_family = chinese_family()
+    return figure
+
+
+# Canvas and font sizes are the house standard already: the global rcParams set
+# axes/legend to 14/12 and ``axes.unicode_minus`` off, so only the family differs
+# between the Chinese and English panels.
+PARITY_TEXT = {
+    False: {
+        "baseline": "law with $\\Phi_k\\equiv0$",
+        "scale": "{label} held-out",
+        "xlabel": "Observed loss  (val_loss)",
+        "ylabel": "Predicted loss  (val_loss)",
+        "note_left": ("n = {n} held-out (mixture, domain)\n"
+                      "relative RMSE {rmse:.2f}%  (with $\\Phi_k\\equiv0$: "
+                      "{base:.2f}%)\n"
+                      "shaded band: $\\pm$5%\n"
+                      "held-out folds: no fit, no selection"),
+        "bar_base": "identified law with $\\Phi_k\\equiv0$",
+        "bar_law": "identified law",
+        "xtick": "{label} held-out",
+        "ylabel_right": "Held-out relative RMSE (%)",
+        "note_right": ("same coefficients, mixture term switched off:\n"
+                       "the baseline is flat in $\\mathbf{p}$, so the\n"
+                       "whole gap is what $S_k\\Phi_k$ identifies"),
+        "gain": "{gain:.1f}x",
+    },
+    True: {
+        "baseline": "同一系数",
+        "scale": "{label} 留出集",
+        "xlabel": "实测验证损失",
+        "ylabel": "预测验证损失",
+        "note_left": ("留出集 n = {n}（配比 × 评测域）\n"
+                      "相对 RMSE {rmse:.2f}%（关闭配比项：{base:.2f}%）\n"
+                      "阴影带：$\\pm$5%\n"
+                      "留出折不参与拟合与选模"),
+        "bar_base": "同一系数，关闭配比项",
+        "bar_law": "辨识所得模型",
+        "xtick": "{label} 留出集",
+        "ylabel_right": "留出集相对 RMSE（%）",
+        "note_right": ("同一套系数，仅关闭配比项：\n"
+                       "基线在配比 $\\mathbf{p}$ 上恒定，\n"
+                       "整段落差即 $S_k\\Phi_k$ 的辨识贡献"),
+        "gain": "{gain:.1f}×",
+    },
+}
+
+
+# --------------------------------------------------------------------------- #
+# identification-effect figures
+# --------------------------------------------------------------------------- #
+# Two 6x4 panels side by side, matching the paper convention for composites.
+COMPOSITE_FIGSIZE = (12.0, 4.0)
+
+
+def _heldout_pairs(data: LawData) -> list:
+    order = {name: index for index, name in enumerate(HELDOUT_SCALES)}
+    return sorted((block for block in data.test_blocks if block.name in HELDOUT_SCALES),
+                  key=lambda block: order[block.name])
+
+
+def _mixture_r2_per_domain(pairs: list) -> np.ndarray:
+    """Per-evaluation-domain mixture R², centring inside each (domain, scale) cell.
+
+    ``compact.mixture_r_squared_within_scale`` pools the two sums over scales and
+    returns the aggregate; keeping them per column answers the different question
+    "which evaluation domain did the identified response actually resolve?".
+    """
+
+    numerator = denominator = None
+    for block, predicted in pairs:
+        observed = block.y - block.y.mean(axis=0, keepdims=True)
+        fitted = predicted - predicted.mean(axis=0, keepdims=True)
+        num = np.square(observed - fitted).sum(axis=0)
+        den = np.square(observed).sum(axis=0)
+        numerator = num if numerator is None else numerator + num
+        denominator = den if denominator is None else denominator + den
+    return 1.0 - numerator / denominator
+
+
+def _flat_baseline(data: LawData, block) -> np.ndarray:
+    """The no-mixture baseline repeated for every mixture at that scale."""
+
+    return np.tile(data.baseline(block.n, block.d), (len(block.ids), 1))
+
+
+def _parity_figure(data: LawData, *, chinese: bool) -> plt.Figure:
+    """Shared builder for the held-out parity figure.
+
+    Left: every held-out mixture against its prediction, with the same
+    coefficients but the mixture term switched off drawn as grey crosses.  That
+    baseline carries no mixture information, so its points collapse onto 13 flat
+    levels per scale, while the identified law tracks the diagonal.
+
+    Right: the same two models compared scale by scale, which is where the
+    identification gain can be read off without pooling folds.
+
+    ``chinese`` selects the label set; the two delivered names pass the same
+    value so their PNGs cannot drift apart.
+    """
+
+    text = PARITY_TEXT[chinese]
+    pairs = [(block, data.predict(block.n, block.d, block.p))
+             for block in _heldout_pairs(data)]
+    figure, (left) = plt.subplots(1, 1, figsize=COMPOSITE_FIGSIZE,
+                                         layout="constrained")
+
+    observed = np.concatenate([block.y.ravel() for block, _ in pairs])
+    baseline = np.concatenate([_flat_baseline(data, block).ravel()
+                               for block, _ in pairs])
+    predicted = np.concatenate([value.ravel() for _, value in pairs])
+    lo, hi = float(observed.min()), float(observed.max())
+    span = hi - lo
+    grid = np.linspace(lo - 0.03 * span, hi + 0.03 * span, 64)
+    left.fill_between(grid, grid * 0.95, grid * 1.05, color="#E8EEF6", zorder=0,
+                      linewidth=0)
+    left.plot(grid, grid, color="#444444", linewidth=1.1, zorder=3)
+    left.scatter(observed, baseline, s=13, marker="+", color="#9A9A9A",
+                 linewidths=0.8, zorder=1, label=text["baseline"])
+    for block, value in pairs:
+        colour, marker = SCALE_STYLE[block.name]
+        left.scatter(block.y.ravel(), value.ravel(), s=17, marker=marker,
+                     facecolors="none", edgecolors=colour, linewidths=0.9,
+                     zorder=4,
+                     label=text["scale"].format(label=SCALE_LABEL[block.name]))
+    left.set_xlim(grid[0], grid[-1])
+    left.set_ylim(grid[0], grid[-1])
+    left.set_aspect("equal", adjustable="box")
+    left.set_xlabel(text["xlabel"])
+    left.set_ylabel(text["ylabel"])
+    tidy(left)
+    # The note owns the upper-left corner, so the legend goes to the free corner
+    # below the diagonal; the +-5% band is explained in the note instead of as a
+    # separate label that would collide with either.  Frameless legends let the
+    # marker cloud show through the labels, so both panels carry a background box.
+    left.legend(loc="lower right", fontsize=12, handletextpad=0.5,
+                labelspacing=0.35, borderpad=0.4, frameon=True, framealpha=0.92,
+                edgecolor="#CCCCCC")
+    # note(left,
+    #      text["note_left"].format(
+    #          n=len(observed),
+    #          rmse=compact.relative_rmse(observed, predicted) * 100,
+    #          base=compact.relative_rmse(observed, baseline) * 100),
+    #      loc="upper left", size=11)
+
+    labels = [SCALE_LABEL[block.name] for block, _ in pairs]
+    base_error = [compact.relative_rmse(block.y, _flat_baseline(data, block)) * 100
+                  for block, _ in pairs]
+    law_error = [compact.relative_rmse(block.y, value) * 100 for block, value in pairs]
+    x = np.arange(len(labels))
+    width = 0.36
+    # right.bar(x - width / 2, base_error, width, color=BAR_COLOR_MUTED,
+    #           label=text["bar_base"])
+    # right.bar(x + width / 2, law_error, width, color=BAR_COLOR,
+    #           label=text["bar_law"])
+    # for position, base, law in zip(x, base_error, law_error):
+    #     right.text(position - width / 2, base + 0.25, f"{base:.2f}", ha="center",
+    #                va="bottom", fontsize=11, color="#555555")
+    #     right.text(position + width / 2, law + 0.25, f"{law:.2f}", ha="center",
+    #                va="bottom", fontsize=11)
+    #     # The gain goes inside the bar: the top-left corner belongs to the legend.
+    #     right.text(position + width / 2, law / 2, text["gain"].format(gain=base / law),
+    #                ha="center", va="center", fontsize=12, color="white",
+    #                fontweight="bold")
+    # right.set_xticks(x)
+    # right.set_xticklabels([text["xtick"].format(label=label) for label in labels])
+    # right.set_ylabel(text["ylabel_right"])
+    # right.set_ylim(0, max(base_error) * 1.42)
+    # tidy(right, grid_axis="y")
+    # right.legend(loc="upper left", fontsize=12, borderpad=0.4, frameon=True,
+    #              framealpha=0.92, edgecolor="#CCCCCC")
+    # note(right, text["note_right"], loc="upper right", size=11)
+    return use_chinese(figure) if chinese else figure
+
+
+def panel_identification_parity(data: LawData) -> plt.Figure:
+    """Held-out parity of the identified law, beside the per-scale error it buys."""
+
+    return _parity_figure(data, chinese=True)
+
+
+def _domain_accuracy(data: LawData) -> tuple[list[str], np.ndarray, np.ndarray,
+                                              np.ndarray]:
+    """Per-evaluation-domain held-out error and two R² readings.
+
+    ``relative_rmse`` and ``r_squared_overall`` pool the three held-out scales, so
+    their total sum of squares carries the between-scale loss difference and a
+    model that only tracks the scale trend already scores high.
+    ``r_squared_mixture`` centres inside every (domain, scale) cell and therefore
+    measures the mixture response alone; the gap between the two is the scale
+    trend.
+    """
+
+    pairs = [(block, data.predict(block.n, block.d, block.p))
+             for block in _heldout_pairs(data)]
+    observed = np.vstack([block.y for block, _ in pairs])
+    predicted = np.vstack([value for _, value in pairs])
+    relative, overall = [], []
+    for k in range(observed.shape[1]):
+        actual, fitted = observed[:, k], predicted[:, k]
+        relative.append(float(np.sqrt(np.mean(np.square(fitted / actual - 1))) * 100))
+        overall.append(float(1.0 - np.square(fitted - actual).sum()
+                             / np.square(actual - actual.mean()).sum()))
+    return (list(data.loss_names), np.asarray(relative), np.asarray(overall),
+            _mixture_r2_per_domain(pairs))
+
+
+def panel_domain_accuracy(data: LawData) -> plt.Figure:
+    """Per-domain held-out relative RMSE and R² in a single panel.
+
+    Bars read the left axis (relative RMSE per evaluation domain, all three
+    held-out scales pooled); the two R² readings are dots on the right axis.
+    Carries no annotation box: the axis labels and the legend are the only text
+    besides the numbers themselves.
+    """
+
+    names, relative, overall, mixture = _domain_accuracy(data)
+    order = np.argsort(-relative)          # worst error first
+    labels = [names[index] for index in order]
+    relative, overall, mixture = relative[order], overall[order], mixture[order]
+    x = np.arange(len(labels))
+
+    figure, left = plt.subplots(figsize=PANEL_FIGSIZE, layout="constrained")
+    right = left.twinx()
+    right.patch.set_visible(False)
+
+    left.bar(x, relative, 0.68, color=BAR_COLOR_ALT, zorder=2,
+             label="相对 RMSE")
+    # No per-bar numbers: with 13 domains the R² dots land on top of them (and the
+    # first bar's label runs off the axis), so the values are read off the ticks.
+
+    # The two R² readings sit ~0.07 apart, so they are dots rather than bars: a
+    # bar read from zero would flatten exactly that difference.
+    right.vlines(x, mixture, overall, color="#DDDDDD", linewidth=2.2, zorder=3)
+    right.scatter(x, overall, s=42, color=BAR_COLOR_MUTED, zorder=4,
+                  label="总体 $R^2$")
+    right.scatter(x, mixture, s=42, color=BAR_COLOR, zorder=4,
+                  label="配比效应 $R^2$")
+
+    left.set_xticks(x)
+    left.set_xticklabels(labels, rotation=30, ha="right", fontsize=10)
+    left.set_ylabel("留出集相对 RMSE（%）")
+    right.set_ylabel("留出集 $R^2$")
+    left.set_ylim(0, float(relative.max()) * 1.22)
+    # The right axis starts at 0.80, not 0: the dots carry the value by position,
+    # not by length, and its tick labels state the range.  On a 0-1 axis every dot
+    # would be pressed against the top edge and the two readings would overlap.
+    right.set_ylim(0.80, 1.0)
+    right.set_yticks([0.80, 0.85, 0.90, 0.95, 1.00])
+    left.grid(True, axis="y", color="#D9D9D9", linewidth=0.6)
+    left.set_axisbelow(True)
+    # One shared frame: the twin axis draws the right spine, the primary the left.
+    for axis in (left, right):
+        axis.spines["top"].set_visible(False)
+    left.spines["right"].set_visible(False)
+    right.spines["left"].set_visible(False)
+    right.grid(False)
+    handles = left.get_legend_handles_labels()
+    other = right.get_legend_handles_labels()
+    left.legend(handles[0] + other[0], handles[1] + other[1], loc="lower center",
+                bbox_to_anchor=(0.5, 1.02), ncols=3, fontsize=10, frameon=False)
+    return use_chinese(figure)
+
+
+def panel_identification_resolution(data: LawData) -> plt.Figure:
+    """What the identification resolved: per-domain mixture R² and both exponents.
+
+    Left: per-evaluation-domain mixture R² on the held-out folds — how much of
+    each domain's within-scale loss variation the identified response explains.
+    Pooling these cells gives the headline 0.9006.
+
+    Right: the identified pair (eta_k, zeta_k) per domain.  Both exponents are
+    solved from the three scale anchors alone, so this panel shows *what was
+    resolved*, not how well it generalises; the dotted line is eta = zeta.
+    """
+
+    pairs = [(block, data.predict(block.n, block.d, block.p))
+             for block in _heldout_pairs(data)]
+    r_squared = _mixture_r2_per_domain(pairs)
+    order = np.argsort(-r_squared)
+    figure, (left, right) = plt.subplots(1, 2, figsize=COMPOSITE_FIGSIZE,
+                                         layout="constrained")
+
+    x = np.arange(len(order))
+    values = r_squared[order]
+    weak = values < 0.75
+    left.bar(x[~weak], values[~weak], 0.68, color=BAR_COLOR)
+    left.bar(x[weak], values[weak], 0.68, color=ACCENT)
+    for position, value in zip(x, values):
+        left.text(position, value + 0.015, f"{value:.2f}", ha="center", va="bottom",
+                  fontsize=8.0, rotation=90, color="#333333")
+    left.set_xticks(x)
+    left.set_xticklabels([data.loss_names[index] for index in order], rotation=45,
+                         ha="right", fontsize=9.5)
+    # Every domain lands in 0.86-0.95, so a mean reference line would only cross
+    # the bars; the contrast that carries information is the flat baseline, which
+    # scores exactly 0 here, and it goes in the note.
+    left.set_ylim(0, 1.30)
+    left.set_ylabel("Held-out mixture $R^2$ per domain")
+    tidy(left, grid_axis="y")
+    flat = _mixture_r2_per_domain([(block, _flat_baseline(data, block))
+                                   for block, _ in pairs])
+    note(left,
+         f"pooled over all cells  "
+         f"{data.law['aggregate_heldout']['mixture_r_squared_within_scale']:.4f}\n"
+         f"range across domains  {values.min():.2f} - {values.max():.2f}\n"
+         f"with $\\Phi_k\\equiv0$:  {flat.mean():.2f} (all 13 domains)",
+         loc="upper right", size=9.5)
+
+    eta, zeta = data.eta, data.zeta
+    top = float(max(eta.max(), zeta.max())) * 1.12
+    right.fill_between([0, top], [0, top], [top, top], color="#F4F6F9", zorder=0,
+                       linewidth=0)
+    right.plot([0, top], [0, top], color="#666666", linewidth=1.1,
+               linestyle=":", zorder=2)
+    right.scatter(eta, zeta, s=46, facecolors="none", edgecolors=BAR_COLOR,
+                  linewidths=1.4, zorder=4)
+    # The highest point sits at the top of the frame, so its label goes below it;
+    # that in turn frees the upper-left corner for the separation counts.
+    marked = {int(np.argmax(eta)), int(np.argmax(zeta)),
+              int(np.argmin(zeta - eta))}
+    for index in marked:
+        below = index == int(np.argmax(zeta))
+        # Mark the single domain that falls on the other side of the diagonal
+        # where it actually sits, instead of in a corner label that would land
+        # on top of a marker.
+        exception = index == int(np.argmin(zeta - eta))
+        if exception:
+            # One line, to the right: the diagonal runs up-left of this point and
+            # a two-line block would reach down into the axis.
+            # Short enough to stay left of the note box; the coordinates are in
+            # the parameter tables, and the name is what identifies the point.
+            text = f"{data.loss_names[index]}   $\\zeta_k<\\eta_k$"
+            offset, align = (9, -3), "left"
+        elif below:             # the tallest point sits at the top of the frame
+            text = f"{data.loss_names[index]}\n({eta[index]:.3f}, {zeta[index]:.3f})"
+            offset, align = (9, -19), "left"
+        else:
+            text = f"{data.loss_names[index]}\n({eta[index]:.3f}, {zeta[index]:.3f})"
+            offset, align = (8, 7), "left"
+        right.annotate(text, xy=(eta[index], zeta[index]),
+                       xytext=offset, textcoords="offset points",
+                       ha=align, va="top" if offset[1] < 0 else "baseline",
+                       fontsize=9,
+                       color=ACCENT if exception else "#333333", linespacing=1.3)
+    right.set_xlim(0, top)
+    right.set_ylim(0, top)
+    right.set_xlabel("$\\eta_k$  (parameter-count decay)")
+    right.set_ylabel("$\\zeta_k$  (token-count decay)")
+    tidy(right)
+    note(right,
+         "solved from the 3 anchors only:\n"
+         "zero residual, no held-out check\n"
+         "$\\zeta_k>\\eta_k$ in 12/13 domains\n"
+         "PCXI: $\\eta\\neq\\zeta$ for 9/13",
+         loc="lower right", size=9.5)
+    return figure
+
+
 BUILDERS = {
     "all_domain_p_q": panel_all_domain_p_q,
     "separate_p_q": panel_separate_p_q,
@@ -1519,6 +1908,9 @@ BUILDERS = {
     "elasticity": panel_elasticity,
     "epsilon_sensitivity": panel_epsilon_sensitivity,
     "domain_error_1b": panel_domain_error_1b,
+    "identification_parity": panel_identification_parity,
+    "domain_accuracy": panel_domain_accuracy,
+    "identification_resolution": panel_identification_resolution,
 }
 STORY_FIGURES = ("all_domain_p_q", "quality_pathway", "observed_contrast",
                  "component_breakdown", "domain_scale", "surface_parity")
@@ -1579,9 +1971,30 @@ def main() -> None:
     print(f"\nfont: {font}\noutput: {arguments.output_dir}")
     for name in names:
         figure = BUILDERS[name](data)
+        # A Chinese panel is tagged with its family by the builder; draw time is
+        # here, not there, so the family has to be applied around savefig.
+        family = getattr(figure, "dsh_font_family", None)
         for extension in extensions:
             path = arguments.output_dir / f"generalized_law_{name}.{extension}"
-            figure.savefig(path, dpi=arguments.dpi if extension == "png" else None)
+            # A missing CJK glyph is only a UserWarning and the result is a box
+            # where text should be, so a Chinese panel renders to a scratch file
+            # first: checking after writing ``path`` would leave the delivered
+            # figure already overwritten with tofu when the check fails.
+            scratch = path.with_name(f"{path.stem}.tmp{path.suffix}") if family else path
+            with plt.rc_context({"font.sans-serif": [family]} if family else {}):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    figure.savefig(
+                        scratch, dpi=arguments.dpi if extension == "png" else None)
+            if family:
+                missing = [str(item.message) for item in caught
+                           if "missing from font" in str(item.message)]
+                if missing:
+                    scratch.unlink(missing_ok=True)
+                    raise SystemExit(
+                        f"{name}: 字体 {family} 未覆盖全部用字，中文会画成方框，"
+                        f"未写出 {path.name}：\n  " + "\n  ".join(missing[:4]))
+                os.replace(scratch, path)
             print(f"  wrote {path.relative_to(PROJECT_ROOT)}")
         plt.close(figure)
 

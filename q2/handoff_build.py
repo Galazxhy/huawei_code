@@ -51,6 +51,107 @@ QUALITY_COST_FORMS = {
 }
 
 
+
+def build_scope(support: dict) -> dict:
+    """分层有效范围（人读版见 ``交付文档.md`` §2.4）。
+
+    关键区分：**尺度形状**沿用经典律、由真实 Pythia 日志标定（宽）；
+    **逐域水平**与**配比项**由附件 A 的三个规模锚点标定（窄）。
+    把两层混成一个"支撑区间"会低估尺度维、高估逐域维。
+    """
+
+    return {
+        "summary": (
+            "有效范围分层：尺度形状继承经典律（实测覆盖 N<=11.97B、D<=299.9B、"
+            "C<=2.15e22 FLOPs）；逐域水平与配比项只由附件 A 三个规模锚点标定"
+            "（N<=1B、D<=25B）。"
+        ),
+        "layers": {
+            "scale_shape": {
+                "what": "L 随 N、D 的幂律形状（alpha、beta）",
+                "valid_range": {
+                    "N_parameters_billion": [0.070542, 11.965825],
+                    "D_tokens_billion": [0.134, 299.893],
+                    "FLOPs": [1e17, 2.15308e22],
+                },
+                "evidence": (
+                    "经典律 B1_main_fit 拟合真实 Pythia 训练日志 8 个规模 x 147 个 "
+                    "checkpoint = 1176 点（满网格）：R2=0.99938、RMSE=0.0085、"
+                    "中位 APE 0.29%"
+                ),
+                "inherited": "本律只沿用其指数 alpha=beta=0.29318264，未重拟合",
+                "cross_family": (
+                    "换族直接迁移失效（B2 R2=-16.69 / 中位 APE 28.2%、B4 R2=0.61、"
+                    "B5 R2=0.75）；逐族仿射损失归一化后 R2=0.995 —— "
+                    "形状可迁移，绝对水平须按族重标定"
+                ),
+            },
+            "domain_level": {
+                "what": "13 个评估域各自的 E_k、A_k、B_k（逐域绝对水平）",
+                "valid_range": {
+                    "anchors_N_D": [[1e6, 1e9], [6e7, 1e9], [1e9, 2.5e10]],
+                    "N_parameters_billion": [0.001, 1.0],
+                    "D_tokens_billion": [1.0, 25.0],
+                },
+                "evidence": "附件 A 三个规模点的训练配比；每域 3 个未知数对 3 个方程，恰好饱和",
+                "caveat": (
+                    "超出 1B/25B 后各评估域的具体 Loss 是外推；"
+                    "A_k/B_k 的拆分主要由 1B 点决定（弱识别）"
+                ),
+            },
+            "mixture_response": {
+                "what": "配比响应 Phi_k(p) 与幅度衰减 S_k(N,D)（eta、zeta）",
+                "valid_range": {
+                    "entropy_nats": [support["recorded_entropy_min"],
+                                     support["recorded_entropy_max"]],
+                    "n_recorded_mixtures": support["n_recorded_mixtures"],
+                    "max_share_per_domain": support["recorded_max_share_per_domain"],
+                },
+                "outside": (
+                    "等权配比 1/17 的熵 ln17=2.833 在域外，实测预测偏低 24%~45%"
+                    "（1M -44.9%、60M -43.7%、1B -23.9%）；"
+                    "outside_support() 只检查熵，各域份额上限与 N/D 越界不告警"
+                ),
+                "decay": (
+                    "S_k 中位：1B/25B 0.255、1e10/1e11 0.145、1e11/1e12 0.064、"
+                    "1e12/1e13 0.028 —— 模型认为配比效应在第三问规模上趋于消失，"
+                    "而 zeta 只由 1B 一个规模点标定"
+                ),
+                "caveat": "Phi_k 在参考配比上零中心化，绝对值无意义，只有相对变化有意义",
+            },
+            "quality": {
+                "what": "整体质量等级 Q（quality_scale）",
+                "valid_range": {
+                    "N_parameters_billion": [0.0705, 11.97],
+                    "D_tokens_billion": [10.0, 600.0],
+                    "Q": [0.1, 1.0],
+                },
+                "evidence": (
+                    "独立质量实验（B7，450 点，R2=0.9568）标定 gamma=0.1085；"
+                    "不属于广义标度律本身"
+                ),
+                "caveat": (
+                    "本律内部 Q_i 固定、只有 p_i*Q_i 可识别；用本律直接算质量弹性"
+                    "会得到 -0.230~+0.028 的符号不稳结果，不可用"
+                ),
+            },
+        },
+        "flops_reading": {
+            "budgets_FLOPs": list(BUDGETS),
+            "within_data": (
+                "C<=2.15e22（Pythia 最大点 12B x 300B token = 6ND）：尺度形状与"
+                "绝对水平均有实测支撑，第三问预算下段落在数据区间内"
+            ),
+            "shape_only": (
+                "2.15e22~2.15e23：尺度形状外推；10B 以上只有模型元数据（B9，132 行，"
+                "无可比实测 Loss）与估算 Loss（B10，128 行），B1 对 B10 中位 APE 1.24% "
+                "属内部一致性检查，不构成独立验证"
+            ),
+            "beyond": ">2.15e23：无任何数据支撑，必须作为假设写明",
+        },
+    }
+
+
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
@@ -587,6 +688,7 @@ def main() -> None:
             "source": "题面附录 B（成本函数参数）与 C7（max_position_embeddings）",
         },
         "mixture_support": support,
+        "scope": build_scope(support),
         "verification": verification,
         "scope_note": (
             "本目录只交付第二问的模型与参数，以及第三问需要的外生输入整理；"

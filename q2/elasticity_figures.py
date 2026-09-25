@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "data_analysis" / "Q2_to_Q3"))
 
 import generalized_law as compact  # noqa: E402
 from generalized_law_evaluator import GeneralizedLawEvaluator  # noqa: E402
+from generalized_law_figures import chinese_family  # noqa: E402
 
 ANCHORS = ("1M / 1B tokens", "60M / 1B tokens", "1B / 25B tokens")
 COLORS = ("#4C78A8", "#F58518", "#54A24B", "#B279A2", "#9D755D")
@@ -40,14 +41,17 @@ def number(value: str | None) -> float:
     return float(value) if value not in (None, "") else np.nan
 
 
-def register_cjk() -> str | None:
-    """Register the bundled Chinese subset; return its family name or None."""
+def register_cjk() -> str:
+    """Register a CJK font and return its family name.
 
-    if not BUNDLED_CJK.exists():
-        return None
-    from matplotlib import font_manager
-    font_manager.fontManager.addfont(str(BUNDLED_CJK))
-    return font_manager.FontProperties(fname=str(BUNDLED_CJK)).get_name()
+    字体查找交给仓库统一入口 ``generalized_law_figures.chinese_family``：它按
+    ``DSH_CJK_FONT`` → ``.fontwork/NotoSansCJKsc-Regular.otf`` → ``q2/assets`` 子集
+    → 系统 Noto 的顺序找，**找不到直接报错**。本函数原来只认 ``q2/assets`` 下那份
+    子集字体（该目录已被删除），于是找不到时静默退回 ``DejaVu Sans``，汉字全部
+    渲染成方框，只在保存时刷 ``Glyph ... missing from font(s) DejaVu Sans``。
+    """
+
+    return chinese_family()
 
 
 def configure() -> None:
@@ -58,7 +62,7 @@ def configure() -> None:
     # 把 DejaVu 放前面会让汉字落到 DejaVu 上变成方框。子集里带完整 ASCII/Latin-1，
     # 拉丁字形由 Noto Sans CJK 提供，整份图的排版仍然一致。
     family = register_cjk()
-    chain = ([family] if family else []) + ["DejaVu Sans"]
+    chain = [family, "DejaVu Sans"]
     plt.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": chain,
         "axes.spines.top": False,
@@ -144,18 +148,13 @@ def quality_heatmap(rows: list[dict]) -> plt.Figure:
     return fig
 
 
-# 随脚本存放的简体中文子集字体（字形由 q2/figure_font_subset.py 生成）。
-# 本机没有任何中文字体，不注册的话中文会渲染成方框。
-BUNDLED_CJK = ROOT / "q2" / "assets" / "NotoSansSC-Regular-subset.otf"
-
-
 @contextmanager
 def panel_style():
     """Canvas and font sizes of ``classic_law_figures_zh.py``.
 
     Applied only around the figures that ask for them, so the remaining figures
-    in this file keep their own (smaller) global rcParams. Chinese text needs the
-    bundled subset font, so the family chain is replaced for the duration.
+    in this file keep their own (smaller) global rcParams. The CJK family chain is set
+    once by ``configure()`` and is not touched here.
     """
 
     keys = {"axes.labelsize": 14, "axes.titlesize": 14, "xtick.labelsize": 12,
@@ -369,9 +368,9 @@ def mixture_gain_intervals(predicted: list[dict],
         points = int(round(step * 100))
         # 纵轴数值就是附件原始 val_loss 列的量纲（原始表未声明单位，全项目统一按
         # 「验证集交叉熵损失」标注），因此不写单位。
-        top.text(0.98, 0.96, f"预测损失下降（份额 +{points} 个百分点）",
+        top.text(0.98, 0.96, f"预测损失下降值（配比 +{points} 个百分点）",
                  transform=top.transAxes, ha="right", va="top", fontsize=11)
-        bottom.text(0.98, 0.96, f"实测损失下降（份额 +{points} 个百分点）",
+        bottom.text(0.98, 0.96, f"实测损失下降值（配比 +{points} 个百分点）",
                     transform=bottom.transAxes, ha="right", va="top", fontsize=11)
     return fig
 

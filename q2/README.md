@@ -70,8 +70,12 @@ S_k(N, D)       = (N_b / N_ref)^(−η_k) · (D_b / D_ref)^(−ζ_k)
 | `handoff_paper_form.py` | 把广义律整理成**可直接写进论文的形式**（含 13×17 系数表），并验证该写法与原模型的最大偏差 | `data_analysis/Q2_to_Q3/{广义标度律_论文写法.md, generalized_scaling_law_paper_coefficients.csv}` |
 | `handoff_identification.py` | **配对跨规模辨识（PCXI）**：只用同一配比在两个规模上的配对损失，把形状项消掉，从而免形状假设、免 `ε` 地辨识 `(η_k, ζ_k)`，并用留出折检验其预测力 | `data_analysis/Q2_to_Q3/{paired_cross_scale_identification.json, 配对跨规模回归辨识.md}` |
 
-`data_analysis/Q2_to_Q3/交付文档.md` 与 `generalized_law_evaluator.py` 是**手写**的交付物，
-不由脚本生成；改脚本名时要一并手改其中的复现命令。
+`data_analysis/` 下有三份**手写**文档（不由脚本生成，改脚本名或改模型时需一并手改）：
+`广义标度律模型.md`（模型规格：形式、参数全表、适用区间、辨识状态、自检锚点）、
+`Q2_to_Q3/广义标度律参数辨识方法.md`（CSLI 辨识方法）、
+`Q2_to_Q3/交付文档.md` 与 `Q2_to_Q3/generalized_law_evaluator.py`（交付接口）。
+`Q2_to_Q3/广义标度律_论文写法.md`、`Q2_to_Q3/配对跨规模回归辨识.md` 则由脚本生成，
+可直接重跑覆盖。
 
 ### 1.4 质量与配比的边际效益 / 弹性
 
@@ -79,9 +83,22 @@ S_k(N, D)       = (N_b / N_ref)^(−η_k) · (D_b / D_ref)^(−ζ_k)
 | --- | --- | --- | --- |
 | `elasticity_analysis.py` | 质量的边际效益与弹性（用独立的 `B·(D·Q)^(−β)` 形式）；配比在单纯形上的可行方向边际效益与弹性（用组成广义律） | `Q2_to_Q3/generalized_law_evaluator.py`、B7 质量实验、Q2 交付 | `data_analysis/quality_mixture_elasticity/{quality_elasticity.json, allocation_elasticity.json, quality_factorial_grid.csv, mixture_share_quantile_grid.csv, mixture_domain_detail.csv, mixture_source_summary.csv, analysis_report.md}` |
 | `elasticity_figures.py` | 上述分析的图集（中文标注） | `data_analysis/quality_mixture_elasticity/*.csv`、`*.json` | `figures/{quality_curves, quality_heatmap, representative_mixtures, representative_mixtures_loss_cylinders, mixture_gain_intervals, mixture_quantile_slices}.png` |
+| `factor_elasticity_analysis.py` | **各因素边际效用与弹性**（`N`、`D`、`p` 由广义律、`Q` 由独立质量律）：`N`/`D` 报「相对 +1%」的**精确**降损 `L(x)−L(1.01x)` 与解析弹性（中心差分复核），`p` 报份额 +1 个百分点的可行方向降损（仅内点、扰动前后均在支撑域内），`Q` 报 `Q+0.01` 的精确降损；含 10B/250B 情景外推行与「汇总表可由明细重算」的验收自检 | `Q2_to_Q3/elasticity_and_substitution.json`、交付求值器 | `data_analysis/factor_marginal_elasticity/{marginal_utility.json, summary_table.csv, scale_domain_detail.csv, mixture_direction_detail.csv, quality_response_curve.csv, mixture_share_sweep.csv, analysis_report.md}` |
+| `factor_elasticity_figures.py` | 上述分析的图件（中文标注，PNG，供 LaTeX 使用；不出现数据附件代号） | `data_analysis/factor_marginal_elasticity/*` | `figures/{figure_a_scale_mixture_sensitivity, figure_b_quality_response, figure_mixture_share_sweep, figure_mixture_directional_gain}.png` |
+| `quality_substitution_analysis.py` | **等损失替代关系**：在 `N` 与配比不变时，提高 Token 质量能少用多少 Token。先定义两种量（**可节省 Token** `D₀(1−Q₀/Q₁)` 与**等效新增 Token** `D₀(Q₁/Q₀−1)`），再用「留一质量等级」交叉验证检验 `D·Q` 假设，并对照自由指数模型 `B·D^(−β_D)·Q^(−β_Q)`，报告 `r=β_Q/β_D` 的 bootstrap 区间；另用同 `N`、同 `D·Q` 观测的组内损失极差量化「等效」的误差 | 质量实验设计 450 组 | `data_analysis/quality_token_substitution/{quality_substitution.json, substitution_table.csv, holdout_by_quality_level.csv, analysis_report.md}` |
+| `quality_substitution_figures.py` | 上述替代关系的图件（一图）：横轴 `Q`、纵轴维持参考损失所需 Token，画 `D₀Q₀/Q` 与自由指数模型的对照曲线，标注 `Q: 0.6→0.7` 的节省量（中文标注，PNG） | `data_analysis/quality_token_substitution/*` | `figures/quality_token_substitution.png` |
+| `joint_substitution_analysis.py` | **广义标度律指导下的联合等损失替代**：锚定式 `L_k† = E_k + A_k N^(−α) + (Q/Q_0)^(−γ)[B_k D^(−β) + S_k φ_k(Q⁽⁰⁾,p)]`，`S_k`、`φ_k` 及全部原有参数沿用已验证的广义律（`Q=Q_0` 时严格退化，实测偏差 4e-16），`γ` 由独立质量实验标定；固定 `N` 后沿单纯形可行方向移动 `p`、逐目标求解维持同一损失所需的 `D`；同时报「完全耦合」与「质量仅作用于 `B_kD^(−β)`」两种耦合的替代区间；并在 `test_1b` 的**全部 64 条**记录配比上直接检验「熵越大效果越好」（结论：不成立，相对节省率几近只由质量台阶决定，绝对节省只随所需 Token 水平变化）。等损失曲线与三维柱图共用同一组 6 个代表性配比 | 交付广义律、`Q2_to_Q3/elasticity_and_substitution.json`、质量实验 450 组 | `data_analysis/joint_quality_mixture_substitution/{joint_substitution.json, joint_substitution_by_target.csv, entropy_effect_by_mixture.csv, feasible_directions.csv, analysis_report.md}` |
+| `joint_substitution_figures.py` | 上述联合替代的两张图：①**六条**记录配比的 `Q–D` 等损失曲线（与三维柱图同一组配比，**单格**：对数纵轴画维持同一目标损失所需的 Token）；②同一张等损失曲线换评估域的对照（`arxiv`，除目标损失外口径完全一致），并与主图合成 `joint_iso_loss_curves_two_domains.png`（一张画布两格，**共用纵轴与图例**）；③6 个代表性配比的三维柱图（柱顶扇形 = 配比组成，**柱高 = 提升质量可节省的 Token**，早期「左柱 `Q₀`/右柱 `Q₁` 取高度差」的版本因相对节省仅 5% 而在图上不可辨）；④**配比的影响**横向对比图（每行一个配比，横轴 = 维持同一目标损失所需 Token，实心/空心点 = `Q₀`/`Q₁`），同样出 `arxiv` 版并合成 `joint_mixture_effect_two_domains.png`（一张画布两格，共用纵轴与图例、右格去掉行标签，行顺序固定为主域排序，可逐行对照） | `data_analysis/joint_quality_mixture_substitution/*` | `figures/{joint_iso_loss_curves, joint_iso_loss_curves_arxiv, joint_iso_loss_curves_two_domains, joint_iso_loss_cylinders, joint_mixture_effect, joint_mixture_effect_arxiv, joint_mixture_effect_two_domains}.png` |
 
 > 两条律的损失标定不同，**它们的导数不可相加、也不可相除**来推替代率；
 > 脚本里对这一点有显式注释与产物说明。
+>
+> `factor_elasticity_*` 的统一口径是：边际效益 `g_x = −∂L/∂x`（正值 = 降损）、弹性
+> `ε_x = ∂lnL/∂lnx`（负值 = 增大该因素降损）。注意 `−∂L/∂lnx` **不等于**「提高 1% 的降损」，
+> 前者是局部对数导数，后者按 `L(x) − L(1.01x)` 精确计算，两者都在明细里但表头分开标注。
+> 跨目标的四分位区间是**分布范围**，不是置信区间。**各因素工作点不同**
+> （`N`/`D`/`p` 在配比实验的观测锚点上，`Q` 在 B7 设计域内），因此它们的弹性
+> 不可横向相减。详见 `data_analysis/factor_marginal_elasticity/analysis_report.md`。
 
 ### 1.5 `classic_law.py` 的搜索阶梯
 
@@ -242,8 +259,9 @@ python q2/elasticity_figures.py
   `(p, Q)` 的缩放不可分；因此本目录不报告“质量对 Loss 的独立边际效应”，
   该效应改由 §1.4 用独立的质量实验单独估计：B7 的 10 点质量网格
   （`Q_score ∈ {0.1, 0.2, …, 1.0}`，配 `N/D` 组合，共 450 行）；
-* **`w^pQ` / `w^clr` 不可逐域解释**：69% 的系数为负，且在熵控制下逐域排序会塌掉
-  （Spearman 由正转 −0.098）。它们是拟合出来的响应方向，不是“域的客观价值”；
+* **`w^pQ` / `w^clr` 不可逐域解释**：**43.67%** 的系数为负（标准化后符号分布相同），
+  且系数只与 `Q_i` 识别到共同尺度（换 `Q` 的刻度不改变预测）。它们是拟合出来的
+  响应方向，不是"域的客观价值"；
 * **1B 锚点只有 64 个配比**，不足以支撑独立的实际损失估计量；
 * **B6 不是 B7 的独立重复**（B6 ⊂ B7，360/360 键完全相同、`val_loss` 逐行一致），
   两者同时使用不构成交叉验证；**B8 不可用**（138 个格点 100% 方向反转，

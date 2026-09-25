@@ -1,0 +1,50 @@
+\contentsline {section}{\numberline {一、}问题重述}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}问题背景}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}问题重述}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}总体技术路线}{4}{subsection.1.3}%
+\contentsline {section}{\numberline {二、}基本假设与符号说明}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}基本假设}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}符号说明}{4}{subsection.2.2}%
+\contentsline {section}{\numberline {三、}数据说明与预处理}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}数据来源及可信度分层}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}数据口径统一}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}训练、检验及外推数据划分}{5}{subsection.3.3}%
+\contentsline {section}{\numberline {四、}问题一：数据质量评价、冲突消解及领域配比}{5}{section.4}%
+\contentsline {subsection}{\numberline {4.1}数据质量评价}{5}{subsection.4.1}%
+\contentsline {subsubsection}{\numberline {4.1.1}质量信号统一表征与方向审计}{5}{subsubsection.4.1.1}%
+\contentsline {subsubsection}{\numberline {4.1.2}域均衡层次质量评价}{6}{subsubsection.4.1.2}%
+\contentsline {subsubsection}{\numberline {4.1.3}质量评价结果与一致性检验}{7}{subsubsection.4.1.3}%
+\contentsline {subsection}{\numberline {4.2}质量冲突消解}{8}{subsection.4.2}%
+\contentsline {subsubsection}{\numberline {4.2.1}质量冲突的域感知识别}{9}{subsubsection.4.2.1}%
+\contentsline {subsubsection}{\numberline {4.2.2}冲突证据的可靠性重加权}{9}{subsubsection.4.2.2}%
+\contentsline {subsubsection}{\numberline {4.2.3}冲突消解效果及稳健性}{9}{subsubsection.4.2.3}%
+\contentsline {subsection}{\numberline {4.3}领域配比--Loss关系}{10}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}配比数据标准化及质量先验检验}{10}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}配比--Loss 响应的预测与解释模型}{11}{subsubsection.4.3.2}%
+\contentsline {subsubsection}{\numberline {4.3.3}领域份额替换及互补结构}{11}{subsubsection.4.3.3}%
+\contentsline {subsubsection}{\numberline {4.3.4}配比规律的跨尺度迁移边界}{12}{subsubsection.4.3.4}%
+\contentsline {section}{\numberline {五、}问题二：广义标度律及语料规模--质量、配比替代}{13}{section.5}%
+\contentsline {subsection}{\numberline {5.1}经典标度律的局限与语料规模--质量、配比分析}{13}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}广义标度律设计与参数辨识}{14}{subsection.5.2}%
+\contentsline {subsubsection}{\numberline {5.2.1}经典标度律的参数辨识模型建立与验证}{14}{subsubsection.5.2.1}%
+\contentsline {paragraph}{损失尺度归一化}{14}{paragraph*.13}%
+\contentsline {paragraph}{可分离非线性最小二乘法}{14}{paragraph*.14}%
+\contentsline {paragraph}{自适应结构早停}{15}{paragraph*.15}%
+\contentsline {paragraph}{经典标度律的拟合、验证与外推}{16}{paragraph*.16}%
+\contentsline {subsubsection}{\numberline {5.2.2}广义标度律的设计}{16}{subsubsection.5.2.2}%
+\contentsline {subsubsection}{\numberline {5.2.3}广义标度律的参数辨识模型建立与验证}{18}{subsubsection.5.2.3}%
+\contentsline {paragraph}{锚定标准律}{18}{paragraph*.21}%
+\contentsline {paragraph}{分阶段参数辨识}{18}{paragraph*.22}%
+\contentsline {paragraph}{因子对比}{19}{paragraph*.23}%
+\contentsline {paragraph}{验证}{19}{paragraph*.25}%
+\contentsline {subsection}{\numberline {5.3}广义标度律指导下的语料规模--质量、配比替代}{20}{subsection.5.3}%
+\contentsline {subsubsection}{\numberline {5.3.1}广义标度律各因素边际效用与弹性分析}{20}{subsubsection.5.3.1}%
+\contentsline {subsubsection}{\numberline {5.3.2}广义标度律指导下的语料规模--质量、配比替代}{21}{subsubsection.5.3.2}%
+\contentsline {subsubsection}{\numberline {5.3.3}广义标度律的质量、配比替代边界}{23}{subsubsection.5.3.3}%
+\contentsline {section}{\numberline {六、}问题三：算力约束下的联合资源配置}{23}{section.6}%
+\contentsline {section}{\numberline {七、}问题四：技术演进分解及能力前沿预测}{23}{section.7}%
+\contentsline {section}{\numberline {八、}结论、局限与推广}{23}{section.8}%
+\contentsline {section}{附录 \numberline {A}完整数据审计表}{25}{appendix.1.A}%
+\contentsline {section}{附录 \numberline {B}关键参数与敏感性结果}{25}{appendix.1.B}%
+\contentsline {section}{附录 \numberline {C}程序代码}{25}{appendix.1.C}%
+\contentsfinish 
