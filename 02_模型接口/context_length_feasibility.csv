@@ -1,6 +1,0 @@
-L_ctx,model_count_in_C7,example_models,C_attn_over_C_train,attention_share_of_budget,exceeds_critical,note
-2048,18,EleutherAI/pythia-70m; EleutherAI/pythia-160m; EleutherAI/pythia-410m; EleutherAI/pythia-1b,0.0682667,0.0639041,False,基础训练开销仍占主导
-4096,8,meta-llama/Llama-2-7b-hf; meta-llama/Llama-2-13b-hf; meta-llama/Llama-2-70b-hf; microsoft/Phi-3-mini-4k-instruct,0.136533,0.120131,False,基础训练开销仍占主导
-8192,7,meta-llama/Meta-Llama-3-8B; meta-llama/Meta-Llama-3-70B; google/gemma-2-2b; google/gemma-2-9b,0.273067,0.214495,False,基础训练开销仍占主导
-32768,11,mistralai/Mistral-7B-v0.1; mistralai/Mixtral-8x7B-v0.1; Qwen/Qwen2-0.5B; Qwen/Qwen2-1.5B,1.09227,0.522049,True,注意力开销超过基础训练开销
-131072,1,meta-llama/Llama-3.1-8B,4.36907,0.813748,True,注意力开销超过基础训练开销
