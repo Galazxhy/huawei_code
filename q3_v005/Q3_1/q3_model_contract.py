@@ -45,9 +45,10 @@ from scipy.optimize import linprog
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HANDOFF_Q1 = ROOT / "00_交接输入/Q1_to_Q2"
-HANDOFF_Q2 = ROOT / "00_交接输入/Q2_to_Q3"
-ATTACHMENTS = ROOT / "00_交接输入/支持与复核数据"
+INPUTS = ROOT / "Q3_1/00_交接输入"
+HANDOFF_Q1 = INPUTS / "Q1_to_Q2"
+HANDOFF_Q2 = INPUTS / "Q2_to_Q3"
+ATTACHMENTS = INPUTS / "支持与复核数据"
 
 
 def sha256(path: Path) -> str:
@@ -417,8 +418,8 @@ class Q3ModelContract:
             files.append(ATTACHMENTS / "A_data_value/regmix_tables" / filename)
         files.append(ATTACHMENTS / "A_data_value/regmix_tables/train_pile_loss_1m.csv")
         files.append(ATTACHMENTS / "来源清单.json")
-        files += sorted((ROOT / "02_代码与实验").glob("*.py"))
-        files.append(ROOT / "01_项目管理/问题三统一执行方案.md")
+        files += [ROOT / "Q3_1/q3_model_contract.py", ROOT / "Q3_2/q3_optimizer.py",
+                  ROOT / "Q3_3/run_q3_experiments.py"]
         return {str(p.relative_to(ROOT.parent)): sha256(p) for p in files}
 
 

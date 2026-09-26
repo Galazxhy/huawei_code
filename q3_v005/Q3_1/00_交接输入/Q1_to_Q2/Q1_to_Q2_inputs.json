@@ -1,0 +1,352 @@
+{
+  "Q7_final_quality": {
+    "arxiv": 0.7094894002981454,
+    "book": 0.4994921312324439,
+    "c4": 0.5546179480811991,
+    "commoncrawl": 0.6061136105391854,
+    "github": 0.478453532000868,
+    "stackexchange": 0.6028669215424138,
+    "wikipedia": 0.5956867175934213
+  },
+  "Q17_final_quality": {
+    "arxiv": {
+      "quality_domain": "arxiv",
+      "Q17": 0.7094894002981454
+    },
+    "freelaw": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "nih_exporter": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "pubmed_central": {
+      "quality_domain": "arxiv",
+      "Q17": 0.7094894002981454
+    },
+    "wikipedia_en": {
+      "quality_domain": "wikipedia",
+      "Q17": 0.5956867175934213
+    },
+    "dm_mathematics": {
+      "quality_domain": "arxiv",
+      "Q17": 0.7094894002981454
+    },
+    "github": {
+      "quality_domain": "github",
+      "Q17": 0.478453532000868
+    },
+    "philpapers": {
+      "quality_domain": "arxiv",
+      "Q17": 0.7094894002981454
+    },
+    "stackexchange": {
+      "quality_domain": "stackexchange",
+      "Q17": 0.6028669215424138
+    },
+    "enron_emails": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "gutenberg_pg_19": {
+      "quality_domain": "book",
+      "Q17": 0.4994921312324439
+    },
+    "pile_cc": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "ubuntu_irc": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "europarl": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "hackernews": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    },
+    "pubmed_abstracts": {
+      "quality_domain": "arxiv",
+      "Q17": 0.7094894002981454
+    },
+    "uspto_backgrounds": {
+      "quality_domain": "commoncrawl",
+      "Q17": 0.6061136105391854
+    }
+  },
+  "mixture_domains": [
+    "arxiv",
+    "freelaw",
+    "nih_exporter",
+    "pubmed_central",
+    "wikipedia_en",
+    "dm_mathematics",
+    "github",
+    "philpapers",
+    "stackexchange",
+    "enron_emails",
+    "gutenberg_pg_19",
+    "pile_cc",
+    "ubuntu_irc",
+    "europarl",
+    "hackernews",
+    "pubmed_abstracts",
+    "uspto_backgrounds"
+  ],
+  "loss_domains": [
+    "arxiv",
+    "freelaw",
+    "pubmed_central",
+    "wikipedia_en",
+    "dm_mathematics",
+    "github",
+    "stackexchange",
+    "gutenberg_pg_19",
+    "pile_cc",
+    "ubuntu_irc",
+    "hackernews",
+    "pubmed_abstracts",
+    "uspto_backgrounds"
+  ],
+  "loss_standardization": {
+    "loss_domains": [
+      "arxiv",
+      "freelaw",
+      "pubmed_central",
+      "wikipedia_en",
+      "dm_mathematics",
+      "github",
+      "stackexchange",
+      "gutenberg_pg_19",
+      "pile_cc",
+      "ubuntu_irc",
+      "hackernews",
+      "pubmed_abstracts",
+      "uspto_backgrounds"
+    ],
+    "scale": {
+      "arxiv": {
+        "median": 4.945444822311401,
+        "mad": 0.7089323997497559
+      },
+      "freelaw": {
+        "median": 5.327545881271362,
+        "mad": 0.6584610939025879
+      },
+      "pubmed_central": {
+        "median": 5.022839784622192,
+        "mad": 0.7094166278839111
+      },
+      "wikipedia_en": {
+        "median": 5.8121559619903564,
+        "mad": 0.3980114459991455
+      },
+      "dm_mathematics": {
+        "median": 3.846451997756958,
+        "mad": 1.5785465240478516
+      },
+      "github": {
+        "median": 5.087321996688843,
+        "mad": 0.7137572765350342
+      },
+      "stackexchange": {
+        "median": 5.072226524353027,
+        "mad": 0.5077841281890869
+      },
+      "gutenberg_pg_19": {
+        "median": 5.400668144226074,
+        "mad": 0.289792537689209
+      },
+      "pile_cc": {
+        "median": 5.731544494628906,
+        "mad": 0.23636603355407715
+      },
+      "ubuntu_irc": {
+        "median": 6.836472511291504,
+        "mad": 0.8080642223358154
+      },
+      "hackernews": {
+        "median": 5.384201765060425,
+        "mad": 0.23797130584716797
+      },
+      "pubmed_abstracts": {
+        "median": 5.411107063293457,
+        "mad": 0.4103400707244873
+      },
+      "uspto_backgrounds": {
+        "median": 5.349492073059082,
+        "mad": 0.36384534835815385
+      }
+    }
+  },
+  "phi_definition": "phi(p) = -G(p), G(p) = (1/13) sum_k z_hat_k(p)",
+  "z_to_raw_loss": "L_k = median_k + 1.4826 * MAD_k * z_k",
+  "scheffe_B_file": "B_multitask_sparse_scheffe.csv",
+  "quality_prior_gamma": 0.0,
+  "regmix_experiment_manifest": [
+    {
+      "dataset_id": "A4/A5",
+      "role": "train",
+      "scale_label": "1M",
+      "file_mixture": "train_mixture_1m.csv",
+      "file_loss": "train_pile_loss_1m.csv",
+      "n_mixtures": 512,
+      "N_params": 1000000,
+      "N_unit": "non-embedding parameters",
+      "D_tokens": "1000000000",
+      "D_unit": "tokens",
+      "loss_type": "observed",
+      "repeats_per_mixture": "1",
+      "repeat_status": "single run per mixture in provided table",
+      "evidence": "RegMix paper Table 2/Appendix: 512 x 1M models trained on 1B tokens"
+    },
+    {
+      "dataset_id": "A6/A7",
+      "role": "test",
+      "scale_label": "1M",
+      "file_mixture": "test_mixture_1m.csv",
+      "file_loss": "test_pile_loss_1m.csv",
+      "n_mixtures": 256,
+      "N_params": 1000000,
+      "N_unit": "non-embedding parameters",
+      "D_tokens": "1000000000",
+      "D_unit": "tokens",
+      "loss_type": "observed",
+      "repeats_per_mixture": "1",
+      "repeat_status": "single run per mixture; no seed/repeat column",
+      "evidence": "RegMix paper Table 2: 256 unseen mixtures for 1M models on 1B tokens"
+    },
+    {
+      "dataset_id": "A8/A9",
+      "role": "test",
+      "scale_label": "60M",
+      "file_mixture": "test_mixture_60m.csv",
+      "file_loss": "test_pile_loss_60m.csv",
+      "n_mixtures": 256,
+      "N_params": 60000000,
+      "N_unit": "non-embedding parameters",
+      "D_tokens": "1000000000",
+      "D_unit": "tokens",
+      "loss_type": "observed",
+      "repeats_per_mixture": "1",
+      "repeat_status": "single run per mixture; no seed/repeat column",
+      "evidence": "RegMix paper Table 2/Appendix: 60M models trained on 1B tokens"
+    },
+    {
+      "dataset_id": "A10/A11",
+      "role": "test",
+      "scale_label": "1B",
+      "file_mixture": "test_mixture_1B.csv",
+      "file_loss": "test_pile_loss_1B.csv",
+      "n_mixtures": 64,
+      "N_params": 1000000000,
+      "N_unit": "non-embedding parameters",
+      "D_tokens": "25000000000",
+      "D_unit": "tokens",
+      "loss_type": "observed",
+      "repeats_per_mixture": "1",
+      "repeat_status": "single run per mixture; no seed/repeat column",
+      "evidence": "RegMix paper Table 2/Appendix: 64 x 1B models trained on 25B tokens"
+    },
+    {
+      "dataset_id": "A12/A13",
+      "role": "extrapolation",
+      "scale_label": "10B",
+      "file_mixture": "est_mixture_10b.csv",
+      "file_loss": "est_pile_loss_10b.csv",
+      "n_mixtures": 63,
+      "N_params": 10000000000,
+      "N_unit": "parameters (label)",
+      "D_tokens": "not specified",
+      "D_unit": "not specified in provided data",
+      "loss_type": "extrapolated",
+      "repeats_per_mixture": "not applicable",
+      "repeat_status": "not applicable: loss is estimated, not a new run",
+      "evidence": "Competition data description labels A12/A13 as extrapolation"
+    },
+    {
+      "dataset_id": "A14/A15",
+      "role": "extrapolation",
+      "scale_label": "70B",
+      "file_mixture": "est_mixture_70b.csv",
+      "file_loss": "est_pile_loss_70b.csv",
+      "n_mixtures": 63,
+      "N_params": 70000000000,
+      "N_unit": "parameters (label)",
+      "D_tokens": "not specified",
+      "D_unit": "not specified in provided data",
+      "loss_type": "extrapolated",
+      "repeats_per_mixture": "not applicable",
+      "repeat_status": "not applicable: loss is estimated, not a new run",
+      "evidence": "Competition data description labels A14/A15 as extrapolation"
+    }
+  ],
+  "phi_scale_transfer": [
+    {
+      "scale_label": "1M",
+      "n_mixtures": 256,
+      "N_params": 1000000.0,
+      "D_tokens": "1000000000.0",
+      "slope_b": 1.0014838686196166,
+      "intercept_a": -0.0158609926373766,
+      "r2_linear": 0.6880130521157914,
+      "loss_type": "observed",
+      "use_in_q2": "yes",
+      "note": "G_scale(p) = a + b * G_1M(p); use slope sign/CI only for observed scales."
+    },
+    {
+      "scale_label": "60M",
+      "n_mixtures": 256,
+      "N_params": 60000000.0,
+      "D_tokens": "1000000000.0",
+      "slope_b": 0.9121486187320582,
+      "intercept_a": -2.034281436286675,
+      "r2_linear": 0.7091157100135935,
+      "loss_type": "observed",
+      "use_in_q2": "yes",
+      "note": "G_scale(p) = a + b * G_1M(p); use slope sign/CI only for observed scales."
+    },
+    {
+      "scale_label": "1B",
+      "n_mixtures": 64,
+      "N_params": 1000000000.0,
+      "D_tokens": "25000000000.0",
+      "slope_b": 0.3477190648218957,
+      "intercept_a": -4.3704070709706,
+      "r2_linear": 0.2897103511357618,
+      "loss_type": "observed",
+      "use_in_q2": "yes",
+      "note": "G_scale(p) = a + b * G_1M(p); use slope sign/CI only for observed scales."
+    },
+    {
+      "scale_label": "10B",
+      "n_mixtures": 63,
+      "N_params": 10000000000.0,
+      "D_tokens": "not specified",
+      "slope_b": -0.3388411385469921,
+      "intercept_a": -5.438904168958596,
+      "r2_linear": 0.352482020542721,
+      "loss_type": "extrapolated",
+      "use_in_q2": "boundary_only",
+      "note": "Extrapolated scale; do not calibrate Q2 absolute scaling."
+    },
+    {
+      "scale_label": "70B",
+      "n_mixtures": 63,
+      "N_params": 70000000000.0,
+      "D_tokens": "not specified",
+      "slope_b": -0.3699716317229202,
+      "intercept_a": -6.025537829117976,
+      "r2_linear": 0.4028138261104217,
+      "loss_type": "extrapolated",
+      "use_in_q2": "boundary_only",
+      "note": "Extrapolated scale; do not calibrate Q2 absolute scaling."
+    }
+  ],
+  "D_scaling_note": "Use phi_1M(p) and phi_scale_transfer only for observed 1M/60M/1B scales; 10B/70B are extrapolated and should not calibrate absolute Q2 scaling.",
+  "note": "First-question mixture data cannot identify quality's independent marginal effect; use B6-B8 in Q2."
+}
