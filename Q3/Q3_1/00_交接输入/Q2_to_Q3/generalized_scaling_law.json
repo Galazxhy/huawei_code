@@ -1,0 +1,202 @@
+{
+  "formula": "L_k=E_k+A_k*N_b^(-alpha)+B_k*D_b^(-beta)+S_k(N,D)*Phi_k(p,Q)",
+  "scale_amplitude": "S_k(N,D)=(N/N_ref)^(-eta_k)*(D/D_ref)^(-zeta_k)",
+  "mixture_response_expanded": "Phi_k=sum_i Wp_(k,i)*(p_i*Q_i-mean_train_1M(p_i*Q_i))+sum_i Wz_(k,i)*(clr_epsilon(p)_i-mean_train_1M(clr_epsilon(p)_i))",
+  "clr_definition": "clr_epsilon(p)_i=log(p_i+epsilon)-mean_j(log(p_j+epsilon))",
+  "epsilon": 0.001,
+  "reference_scale": {
+    "N": 1000000.0,
+    "D": 1000000000.0
+  },
+  "exponents_fixed_from_B1": {
+    "alpha": 0.29318264389038085,
+    "beta": 0.29318264389038085
+  },
+  "per_domain_parameters": {
+    "arxiv": {
+      "E_k": 1.0993272177275994,
+      "A_k": 0.3157134812668241,
+      "B_k": 1.5089308797517864,
+      "eta_k": 0.1118224645420616,
+      "zeta_k": 0.30819218344956695
+    },
+    "freelaw": {
+      "E_k": 0.9767601866096897,
+      "A_k": 0.2550456362361433,
+      "B_k": 2.37555137534444,
+      "eta_k": 0.03601518489456831,
+      "zeta_k": 0.34665447807025085
+    },
+    "pubmed_central": {
+      "E_k": 0.7536790435600936,
+      "A_k": 0.32147387674231476,
+      "B_k": 1.9577811688851392,
+      "eta_k": 0.10224027591669825,
+      "zeta_k": 0.5960370421419351
+    },
+    "wikipedia_en": {
+      "E_k": 1.4792081343569312,
+      "A_k": 0.2557551464677742,
+      "B_k": 2.390648789373972,
+      "eta_k": 0.020366683354216313,
+      "zeta_k": 0.27483566127195486
+    },
+    "dm_mathematics": {
+      "E_k": 0.9750350852084559,
+      "A_k": 0.26179149530331025,
+      "B_k": 0.9278174041146852,
+      "eta_k": 0.1844765024556077,
+      "zeta_k": 0.22846891964014288
+    },
+    "github": {
+      "E_k": 0.1895290191544921,
+      "A_k": 0.4779393760581693,
+      "B_k": 1.4195945654019193,
+      "eta_k": 0.09942612653961375,
+      "zeta_k": 0.32752980811296223
+    },
+    "stackexchange": {
+      "E_k": 0.9719853669267183,
+      "A_k": 0.31645548521043015,
+      "B_k": 1.844270386120444,
+      "eta_k": 0.0686076901774797,
+      "zeta_k": 0.284464344102767
+    },
+    "gutenberg_pg_19": {
+      "E_k": 1.9429402727551521,
+      "A_k": 0.1841752820147894,
+      "B_k": 2.104989042303046,
+      "eta_k": 0.035500751927038735,
+      "zeta_k": 0.04339229585697424
+    },
+    "pile_cc": {
+      "E_k": 2.082856955594757,
+      "A_k": 0.2025725477497166,
+      "B_k": 2.109359515932457,
+      "eta_k": 0.008506370298480994,
+      "zeta_k": 0.27425957010110075
+    },
+    "ubuntu_irc": {
+      "E_k": 1.3384357426337175,
+      "A_k": 0.37579064892932695,
+      "B_k": 2.3322025422620625,
+      "eta_k": 0.10711199733853123,
+      "zeta_k": 0.07198280474570073
+    },
+    "hackernews": {
+      "E_k": 2.403223390742209,
+      "A_k": 0.1865817246669917,
+      "B_k": 1.5797364166651946,
+      "eta_k": 0.026541221618929432,
+      "zeta_k": 0.10235272042550787
+    },
+    "pubmed_abstracts": {
+      "E_k": 1.5100492357693158,
+      "A_k": 0.2541208369732543,
+      "B_k": 2.0030533240193216,
+      "eta_k": 0.010632337017788778,
+      "zeta_k": 0.48121694329487913
+    },
+    "uspto_backgrounds": {
+      "E_k": 1.5645609847292676,
+      "A_k": 0.26177286522497295,
+      "B_k": 1.6296503623254464,
+      "eta_k": 0.04648023763702146,
+      "zeta_k": 0.24342031770138153
+    }
+  },
+  "identifiability": {
+    "quality_elasticity_not_identifiable_from_A": "数据集 A 中每个训练域的 Q_i 固定，模型只能识别 p_i·Q_i 的组合；独立的质量效应必须取自 B6/B7（见 elasticity_and_substitution.json）。",
+    "weights_only_up_to_common_scale": "配比响应带 slope_ref_k，Q·W 的整体尺度被它吸收；报告的权重只有相对意义。",
+    "exponents_borrowed_from_B1": "数据集 A 只有 3 个不同的 (N, D) 点，标准标度律在其上恰好饱和，无法自识别指数；alpha、beta 固定为 B1 的识别值。",
+    "eta_zeta_are_extrapolation": "eta 由 1M↔60M 确定，zeta 实际只由 1B 一个规模点确定；幅度幂律衰减是假设，三个点无法检验。"
+  },
+  "per_domain_r_squared_within_scale_test_60m": {
+    "arxiv": 0.8655222048677873,
+    "freelaw": 0.9401467515896802,
+    "pubmed_central": 0.9217908342483714,
+    "wikipedia_en": 0.9405385654071657,
+    "dm_mathematics": 0.8409621900805062,
+    "github": 0.8531477944036248,
+    "stackexchange": 0.8706288611888159,
+    "gutenberg_pg_19": 0.8917638570787663,
+    "pile_cc": 0.91725727980909,
+    "ubuntu_irc": 0.8766723690309692,
+    "hackernews": 0.8628011097780722,
+    "pubmed_abstracts": 0.8933434491300648,
+    "uspto_backgrounds": 0.9439849193164397
+  },
+  "fit_quality_heldout": {
+    "test_1m": {
+      "n_mixtures": 51,
+      "rmse_loss": 0.23627519447936587,
+      "relative_rmse": 0.05841847137216676,
+      "median_ape": 0.023013823233480054,
+      "p90_ape": 0.08141554726377433,
+      "relative_bias": 0.010189423403678429,
+      "r_squared_macro": 0.9043183807907826,
+      "r_squared_pooled_within_domain": 0.9014810987021187,
+      "mixture_r_squared": 0.9072379855933831,
+      "median_domain_spearman": 0.9599999999999999
+    },
+    "test_60m": {
+      "n_mixtures": 51,
+      "rmse_loss": 0.17854920694940557,
+      "relative_rmse": 0.05489320035090302,
+      "median_ape": 0.026410179622272833,
+      "p90_ape": 0.08673325033567818,
+      "relative_bias": 0.007811817776956053,
+      "r_squared_macro": 0.8900383790747503,
+      "r_squared_pooled_within_domain": 0.8888570085500734,
+      "mixture_r_squared": 0.8912566324201711,
+      "median_domain_spearman": 0.959185520361991
+    },
+    "test_1b": {
+      "n_mixtures": 13,
+      "rmse_loss": 0.09199893050806074,
+      "relative_rmse": 0.04441375449636639,
+      "median_ape": 0.02117336625648811,
+      "p90_ape": 0.07978083250608906,
+      "relative_bias": 0.014077303154231058,
+      "r_squared_macro": 0.7221411233474995,
+      "r_squared_pooled_within_domain": 0.7520241651406461,
+      "mixture_r_squared": 0.7755140559010711,
+      "median_domain_spearman": 0.9395604395604396
+    }
+  },
+  "fit_quality_aggregate": {
+    "rmse_loss": 0.19963062782450874,
+    "relative_rmse": 0.05543257588815153,
+    "median_ape": 0.02400063920623086,
+    "p90_ape": 0.0850146981840998,
+    "relative_bias": 0.009574506445368367,
+    "mixture_r_squared_within_scale": 0.9005920460909769
+  },
+  "self_check_reproduction": [
+    {
+      "block": "train_1m",
+      "n_mixtures": 512,
+      "relative_rmse": 0.060369922512218184,
+      "median_ape": 0.022215239178775718
+    },
+    {
+      "block": "test_1m",
+      "n_mixtures": 256,
+      "relative_rmse": 0.05845543052661939,
+      "median_ape": 0.02163046634749891
+    },
+    {
+      "block": "test_60m",
+      "n_mixtures": 256,
+      "relative_rmse": 0.05631448796156979,
+      "median_ape": 0.025491692382261948
+    },
+    {
+      "block": "test_1b",
+      "n_mixtures": 64,
+      "relative_rmse": 0.05097229656931354,
+      "median_ape": 0.022488075495582745
+    }
+  ],
+  "caveat": "Only three observed scale anchors exist; N and D change together at 1B. eta/zeta follow an assumed separable power law and are not validated for unseen scales. Q_i is fixed and cannot reveal a separate quality effect."
+}

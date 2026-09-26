@@ -1,0 +1,71 @@
+{
+  "loss_domains": [
+    "arxiv",
+    "freelaw",
+    "pubmed_central",
+    "wikipedia_en",
+    "dm_mathematics",
+    "github",
+    "stackexchange",
+    "gutenberg_pg_19",
+    "pile_cc",
+    "ubuntu_irc",
+    "hackernews",
+    "pubmed_abstracts",
+    "uspto_backgrounds"
+  ],
+  "scale": {
+    "arxiv": {
+      "median": 4.945444822311401,
+      "mad": 0.7089323997497559
+    },
+    "freelaw": {
+      "median": 5.327545881271362,
+      "mad": 0.6584610939025879
+    },
+    "pubmed_central": {
+      "median": 5.022839784622192,
+      "mad": 0.7094166278839111
+    },
+    "wikipedia_en": {
+      "median": 5.8121559619903564,
+      "mad": 0.3980114459991455
+    },
+    "dm_mathematics": {
+      "median": 3.846451997756958,
+      "mad": 1.5785465240478516
+    },
+    "github": {
+      "median": 5.087321996688843,
+      "mad": 0.7137572765350342
+    },
+    "stackexchange": {
+      "median": 5.072226524353027,
+      "mad": 0.5077841281890869
+    },
+    "gutenberg_pg_19": {
+      "median": 5.400668144226074,
+      "mad": 0.289792537689209
+    },
+    "pile_cc": {
+      "median": 5.731544494628906,
+      "mad": 0.23636603355407715
+    },
+    "ubuntu_irc": {
+      "median": 6.836472511291504,
+      "mad": 0.8080642223358154
+    },
+    "hackernews": {
+      "median": 5.384201765060425,
+      "mad": 0.23797130584716797
+    },
+    "pubmed_abstracts": {
+      "median": 5.411107063293457,
+      "mad": 0.4103400707244873
+    },
+    "uspto_backgrounds": {
+      "median": 5.349492073059082,
+      "mad": 0.36384534835815385
+    }
+  }
+}

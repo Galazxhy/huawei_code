@@ -1,0 +1,52 @@
+[
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/train_mixture_1m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/train_mixture_1m.csv",
+    "sha256": "04a32ef4ab594376bf90e11404c033668f887c351d6a03ad3744824c7296a2d8"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/train_pile_loss_1m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/train_pile_loss_1m.csv",
+    "sha256": "49a959aa07ce5c20831d5abe3a7896ff0cd90a398bd407c8913fd5588be0465a"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_mixture_1m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_mixture_1m.csv",
+    "sha256": "197267b7d6f15367e2f46c881e564c35b0d34e51b1754bb09d07e650cf8e1ce8"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_mixture_60m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_mixture_60m.csv",
+    "sha256": "197267b7d6f15367e2f46c881e564c35b0d34e51b1754bb09d07e650cf8e1ce8"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_mixture_1B.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_mixture_1B.csv",
+    "sha256": "dd38052949c0a5f84165bdcb3ae3a331c7f07efd9bb83848bd579dfc4ce75a2c"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_pile_loss_1m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_pile_loss_1m.csv",
+    "sha256": "e027b1674f60140a65a87b5e4a59ab5f09dc33e8fd02c080682678074b160f53"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_pile_loss_60m.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_pile_loss_60m.csv",
+    "sha256": "8fe69d59ab7dd4fae4736459f4265ec93c7ed1ad1eca407346052560edc72b5b"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/A_data_value/regmix_tables/test_pile_loss_1B.csv",
+    "snapshot": "00_交接输入/支持与复核数据/A_data_value/regmix_tables/test_pile_loss_1B.csv",
+    "sha256": "b2451e2b7fa15400688edc39e4d32f21ccbe0fb356e07d62a0e9ccddf247114f"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/B_scaling_laws/supplementary_NQ_experiment_expanded.csv",
+    "snapshot": "00_交接输入/支持与复核数据/B_scaling_laws/supplementary_NQ_experiment_expanded.csv",
+    "sha256": "880fd265ca3e1d9bc93b4559af7ed7c18f89040634266c50bae03d88486e0f3a"
+  },
+  {
+    "source": "/home/pz/F_code/F题/real_attachments/C_efficiency_evolution/model_architecture_metadata.csv",
+    "snapshot": "00_交接输入/支持与复核数据/C_efficiency_evolution/model_architecture_metadata.csv",
+    "sha256": "ee24622cb3a6334f08d72c9ea373be26d5e5585bb266367c5f66d77499112ffc"
+  }
+]
