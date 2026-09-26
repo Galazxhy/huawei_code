@@ -1090,7 +1090,7 @@ def _quad_a_into(axis: plt.Axes) -> None:
                    markersize=3.6, label=base._format_size(float(n_value)))
         )
     axis.set_xscale("log")
-    axis.set_xlabel("训练数据量 $D$（十亿 token）")
+    axis.set_xlabel("训练数据量 $D$（B）")
     axis.set_ylabel("验证集交叉熵损失")
     axis.legend(handles=handles, title="参数量 $N$", ncol=2,
                 loc="upper right", handlelength=1.6)
@@ -1119,7 +1119,7 @@ def _quad_b_into(axis: plt.Axes) -> None:
             observed_n, observed_loss, s=28, facecolors="white",
             edgecolors=color, linewidths=1.0, zorder=3)
     axis.set_xscale("log")
-    axis.set_xlabel("模型参数量 $N$（十亿）")
+    axis.set_xlabel("模型参数量 $N$（B）")
     # axis.set_ylabel("验证集交叉熵损失")
     axis.legend(loc="upper right")
     style_axis(axis)

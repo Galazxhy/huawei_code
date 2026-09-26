@@ -392,7 +392,7 @@ def irreducible_floor_diagnostic(
 
 def compositional_features(p: np.ndarray, q: np.ndarray,
                            epsilon: float = COMPOSITIONAL_EPSILON) -> np.ndarray:
-    """Quality-weighted proportions plus centered log ratios on the simplex."""
+    """拼接质量加权份额 ``p_i Q_i`` 与单纯形上的中心化对数比。"""
     log_p = np.log(p + epsilon)
     clr = log_p - log_p.mean(axis=1, keepdims=True)
     return np.column_stack((p * q[None, :], clr))
@@ -403,15 +403,17 @@ def fit_compositional_scaling_law(
     q: np.ndarray, train_names: tuple[str, ...], loss_names: tuple[str, ...],
     alpha: float, beta: float, epsilon: float = COMPOSITIONAL_EPSILON,
 ) -> dict[str, object]:
-    """Fit a separable law using one reference mixture function and scale amplitudes.
+    """用“参考配比形状→规模幅度→经典基线”三阶段辨识广义律。
 
-    The 1M fit determines the composition response. Each later observed scale
-    supplies only a domainwise intercept and slope on its own training fold.
-    These three scale anchors determine nonnegative E/A/B and an empirical
-    N,D power response; the latter is not validated outside the anchors.
+    ``alpha,beta`` 来自独立经典律并保持固定。参考规模训练折确定
+    ``Phi_k(p,Q)`` 的形状；其余观测规模只估计逐目标截距与幅度，
+    最后由三个规模锚点恢复 ``E_k,A_k,B_k,eta_k,zeta_k``。
+    留出折只作检验，规模锚点之外的幂律延伸不视为实证验证。
     """
+    # 阶段一：在参考规模用训练折拟合配比响应，调参折只选 Ridge 强度。
     reference = combine(train_blocks[:2])
     reference_tuning = combine([tune_blocks[0]])
+    # Q_i 随来源固定；p_iQ_i 在这里是组成特征，不单独识别“提高质量”的效应。
     scaler = StandardScaler().fit(compositional_features(reference.p, q, epsilon))
     x_train = scaler.transform(compositional_features(reference.p, q, epsilon))
     x_tune = scaler.transform(compositional_features(reference_tuning.p, q, epsilon))
@@ -425,6 +427,7 @@ def fit_compositional_scaling_law(
     def raw_response(p: np.ndarray) -> np.ndarray:
         return ridge.predict(scaler.transform(compositional_features(p, q, epsilon)))
 
+    # 居中并固定参考幅度，使形状函数与各规模的截距/幅度不互相吸收。
     raw_train = raw_response(reference.p)
     response_center = raw_train.mean(axis=0)
     x_centered = raw_train - response_center
@@ -438,7 +441,12 @@ def fit_compositional_scaling_law(
     def response(p: np.ndarray) -> np.ndarray:
         return (raw_response(p) - response_center) * slope_reference
 
-    scale_training = (reference, combine([train_blocks[2]]), combine([train_blocks[3]]))
+    # 阶段二：每个观测规模只回归一个截距和一个配比响应幅度。
+    scale_training = (
+        reference,
+        combine([train_blocks[2]]),
+        combine([train_blocks[3]]),
+    )
     scale_n = np.asarray([samples.n[0] for samples in scale_training])
     scale_d = np.asarray([samples.d[0] for samples in scale_training])
     reference_n, reference_d = scale_n[0], scale_d[0]
@@ -460,16 +468,22 @@ def fit_compositional_scaling_law(
         amplitudes.append(amplitude)
     baselines = np.stack(baselines)
     amplitudes = np.stack(amplitudes)
-    scale_design = np.column_stack((np.ones(3), scale_n ** (-alpha),
-                                    scale_d ** (-beta)))
-    coefficients = np.stack([nnls(scale_design, baselines[:, k])[0]
-                             for k in range(len(loss_names))])
+    # 阶段三：指数已锚定，用非负最小二乘恢复各目标的 E、A、B。
+    scale_design = np.column_stack(
+        (np.ones(3), scale_n ** (-alpha), scale_d ** (-beta))
+    )
+    coefficients = np.stack([
+        nnls(scale_design, baselines[:, k])[0]
+        for k in range(len(loss_names))
+    ])
     reconstructed = scale_design @ coefficients.T
+    # 前两个锚点 D 相同，先由其幅度比识别 eta；第三点才条件识别 zeta。
     eta = -np.log(amplitudes[1]) / np.log(scale_n[1] / reference_n)
     zeta = (-np.log(amplitudes[2]) - eta * np.log(scale_n[2] / reference_n)
             ) / np.log(scale_d[2] / reference_d)
 
     def predict_block(block: Block) -> np.ndarray:
+        # 任一留出配方共用同一 Phi_k 形状，幅度只由 (N,D) 调制。
         n, d = block.n / 1e9, block.d / 1e9
         baseline = (coefficients[:, 0] + coefficients[:, 1] * n ** (-alpha)
                     + coefficients[:, 2] * d ** (-beta))

@@ -1,0 +1,288 @@
+# 问题二核心算法代码（中文注释精简版）
+# 完整运行入口：q2/classic_law.py、q2/classic_law_early_stopping.py、
+#               q2/generalized_law.py、q2/classic_law_analysis.py。
+# 本文件保留“拟合—选模—辨识”数学核心，省略 CSV 读取、绘图和报告输出。
+# N、D 均按十亿参数、十亿 Token 计；不同来源的原始 Loss 不可直接混合。
+
+import numpy as np
+from scipy.optimize import nnls
+from scipy.stats import spearmanr
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
+
+
+# 一、可分离非线性最小二乘
+# L = E + A*N^(-alpha) + B*D^(-beta)。
+# 给定两个指数后，E、A、B 构成线性最小二乘；网格只搜索 alpha、beta。
+def classic_predict(theta, n, d):
+    e, a, alpha, b, beta = theta
+    return e + a * n**(-alpha) + b * d**(-beta)
+
+
+def profile_classic(n, d, y, alpha, beta):
+    design = np.column_stack((np.ones_like(y), n**(-alpha), d**(-beta)))
+    e, a, b = np.linalg.lstsq(design, y, rcond=None)[0]
+    if e < 0 or e >= np.min(y) or a <= 0 or b <= 0:
+        return None  # 不可约损失和规模项须满足物理方向约束
+    theta = np.array([e, a, alpha, b, beta], dtype=float)
+    sse = float(np.sum((y - classic_predict(theta, n, d))**2))
+    return theta, sse
+
+
+def fit_classic(n, d, y, lower=0.01, upper=1.50, grid_size=31, tol=1e-7):
+    # 粗搜：每个指数网格点重新求线性最小二乘。
+    candidates = [
+        profile_classic(n, d, y, float(alpha), float(beta))
+        for alpha in np.linspace(lower, upper, grid_size)
+        for beta in np.linspace(lower, upper, grid_size)
+    ]
+    feasible = [item for item in candidates if item is not None]
+    if not feasible:
+        raise ValueError("指数范围内无可行解")
+    best = min(feasible, key=lambda item: item[1])
+
+    # 精搜：八邻域停滞时将步长减半；模型形式始终不变。
+    step = (upper - lower) / (grid_size - 1)
+    while step > tol:
+        center = best[0]
+        improved = False
+        for da in (-step, 0.0, step):
+            for db in (-step, 0.0, step):
+                if da == db == 0:
+                    continue
+                alpha, beta = center[2] + da, center[4] + db
+                if not (lower <= alpha <= upper and lower <= beta <= upper):
+                    continue
+                item = profile_classic(n, d, y, alpha, beta)
+                if item is not None and item[1] < best[1] - 1e-18:
+                    best, improved = item, True
+        if not improved:
+            step /= 2
+    return best[0]
+
+
+# 二、自适应权重与结构早停
+# 结构路径：alpha=beta=s；beta=s*、释放 alpha；alpha=s*、释放 beta；
+#          最后 alpha、beta 均自由。不同层只改变指数约束，不改标准律。
+def fit_one_exponent(n, d, y, mode, shared=None,
+                     lower=0.01, upper=1.50, grid_size=31, tol=1e-7):
+    def evaluate(value):
+        if mode == "shared":
+            return profile_classic(n, d, y, value, value)
+        if mode == "release_alpha":
+            return profile_classic(n, d, y, value, shared)
+        if mode == "release_beta":
+            return profile_classic(n, d, y, shared, value)
+        raise ValueError(mode)
+
+    feasible = [item for x in np.linspace(lower, upper, grid_size)
+                if (item := evaluate(float(x))) is not None]
+    if not feasible:
+        raise ValueError("该约束阶段无可行解")
+    best = min(feasible, key=lambda item: item[1])
+    step = (upper - lower) / (grid_size - 1)
+    while step > tol:
+        center = best[0][4 if mode == "release_beta" else 2]
+        improved = False
+        for value in (center - step, center + step):
+            if lower <= value <= upper:
+                item = evaluate(value)
+                if item is not None and item[1] < best[1] - 1e-18:
+                    best, improved = item, True
+        if not improved:
+            step /= 2
+    return best[0]
+
+
+def cross_fitted_score(actual, predicted, cluster, mape_cap=0.20):
+    # 每次用其余簇拟合 L_source=a+b*L_reference，逆映射当前留出簇。
+    # 高度相关的训练检查点共享簇号，不能当作独立验证样本。
+    cluster = np.asarray(cluster)
+    normalized = np.empty_like(actual, dtype=float)
+    groups = np.unique(cluster)
+    for group in groups:
+        heldout = cluster == group
+        training = ~heldout if len(groups) > 1 else np.ones(len(actual), bool)
+        x, y = predicted[training], actual[training]
+        a, b = np.linalg.lstsq(
+            np.column_stack((np.ones_like(x), x)), y, rcond=None
+        )[0]
+        if b <= 1e-8 or not np.isfinite(b):
+            b = max(np.std(y) / max(np.std(x), 1e-12), 1e-8)
+            a = np.mean(y) - b * np.mean(x)
+        normalized[heldout] = (actual[heldout] - a) / b
+    error = predicted - normalized
+    ape = np.median(np.abs(error) / np.maximum(np.abs(normalized), 1e-12))
+    nrmse = np.sqrt(np.mean(error**2)) / max(np.std(normalized), 1e-12)
+    rho = spearmanr(normalized, predicted).statistic
+    rho = float(rho) if np.isfinite(rho) else -1.0
+    return float(min(ape, mape_cap) + 0.25*nrmse + 0.10*(1-rho))
+
+
+def bounded_weights(raw, minimum=0.05, maximum=0.50):
+    # 对超出上下界的来源先锁定，再按剩余原始权重分配剩余质量。
+    if len(raw)*minimum > 1 or len(raw)*maximum < 1:
+        raise ValueError("权重上下界与总和为 1 的条件不相容")
+    assigned, active, remaining = {}, set(raw), 1.0
+    while active:
+        total = sum(max(raw[name], 1e-15) for name in active)
+        proposal = {name: remaining*max(raw[name], 1e-15)/total
+                    for name in active}
+        low = [name for name in active if proposal[name] < minimum]
+        high = [name for name in active if proposal[name] > maximum]
+        if not low and not high:
+            assigned.update(proposal)
+            break
+        for name in low:
+            assigned[name], remaining = minimum, remaining-minimum
+            active.remove(name)
+        for name in high:
+            if name in active:
+                assigned[name], remaining = maximum, remaining-maximum
+                active.remove(name)
+    return {name: assigned[name]/sum(assigned.values()) for name in raw}
+
+
+def adaptive_weights(reference_score, bootstrap_std, priors,
+                     difficulty_power=0.50):
+    # 参考分数由完整经典律事先计算；bootstrap_std 来自分簇重采样。
+    # 先验可靠性 × 验证难度 × 重采样稳定性，确定后在结构路径中冻结。
+    # 默认先验：B2=0.55、B3=0.20、B4=B5=1.00。
+    raw = {}
+    for name, score in reference_score.items():
+        stability = 1 / (1 + bootstrap_std[name] / max(score, 0.02))
+        raw[name] = (priors[name] * max(score, 0.01)**difficulty_power
+                     * stability)
+    return bounded_weights(raw)
+
+
+def choose_structure(b1, validations, weights, full_theta,
+                     min_r2=0.995, penalty_rate=0.001,
+                     min_delta=0.002, patience=1):
+    # b1=(n,d,y)；validations[name]=(n,d,loss,cluster)。
+    # 所有指数网格点只用 B1 最小二乘拟合，外部集只负责结构选择。
+    n, d, y = b1
+    shared = fit_one_exponent(n, d, y, "shared")
+    s = shared[2]
+    def evaluate(name, theta, n_parameters):
+        fitted = classic_predict(theta, n, d)
+        r2 = 1 - np.sum((y-fitted)**2) / np.sum((y-np.mean(y))**2)
+        if r2 < min_r2:
+            return None
+        score = 0.0
+        for source, (nv, dv, loss, cluster) in validations.items():
+            predicted = classic_predict(theta, nv, dv)
+            score += weights[source] * cross_fitted_score(
+                loss, predicted, cluster)
+        return (score + penalty_rate*max(n_parameters-3, 0), name, theta)
+
+    best, bad_layers = None, 0
+    history = []
+    for stage in range(3):
+        if stage == 0:
+            layer = [("shared", shared, 4)]
+        elif stage == 1:
+            layer = [
+                ("release_alpha", fit_one_exponent(n, d, y, "release_alpha", s), 5),
+                ("release_beta", fit_one_exponent(n, d, y, "release_beta", s), 5),
+            ]
+        else:
+            layer = [("full", full_theta, 5)]
+        # 同层候选全部评价完毕后才决定是否释放下一层自由度。
+        candidates = [evaluate(*item) for item in layer]
+        candidates = [item for item in candidates if item is not None]
+        history.extend(candidates)
+        layer_best = min(candidates, default=None, key=lambda item: item[0])
+        if layer_best is not None and (
+            best is None or layer_best[0] < best[0] - min_delta
+        ):
+            best, bad_layers = layer_best, 0
+        else:
+            bad_layers += 1
+        if bad_layers >= patience:
+            break
+    return best, history  # 返回历史最优，而非最后搜索到的结构
+
+
+# 三、标准律锚定的广义律分阶段辨识
+# L_k = E_k+A_k*N^(-alpha)+B_k*D^(-beta)
+#       +(N/N0)^(-eta_k)*(D/D0)^(-zeta_k)*Phi_k(p,Q)。
+# alpha、beta 固定为经典律结果；Q_i 是来源固定属性，不能从配比实验
+# 单独识别“提高同一来源质量”的因果效应。
+def composition_features(p, q, epsilon=1e-3):
+    log_p = np.log(p + epsilon)
+    clr = log_p - np.mean(log_p, axis=1, keepdims=True)
+    return np.column_stack((p*q[None, :], clr))
+
+
+def identify_generalized(reference, tuning, later, q, alpha, beta,
+                         ridges=(0.01, 0.1, 1.0, 10.0, 100.0)):
+    # reference、tuning=(p,y,n,d)，later 为另两个观测规模的同型元组；
+    # y 的列对应不同评估目标。最后的留出折不作为此函数输入。
+    p0, y0, n0, d0 = reference
+    pt, yt, _, _ = tuning
+
+    # 阶段一：仅在参考规模学习配比响应的形状，调参折只选岭强度。
+    scaler = StandardScaler().fit(composition_features(p0, q))
+    x0 = scaler.transform(composition_features(p0, q))
+    xt = scaler.transform(composition_features(pt, q))
+    options = []
+    for strength in ridges:
+        ridge = Ridge(alpha=strength).fit(x0, y0)
+        score = np.sqrt(np.mean((ridge.predict(xt)/yt-1)**2))
+        options.append((score, strength, ridge))
+    _, strength, ridge = min(options, key=lambda item: item[0])
+
+    def raw_response(p):
+        return ridge.predict(scaler.transform(composition_features(p, q)))
+
+    center = np.mean(raw_response(p0), axis=0)
+    centered = raw_response(p0)-center
+    slope = np.sum(centered*(y0-np.mean(y0, axis=0)), axis=0) / np.sum(
+        centered**2, axis=0)
+    if np.any(slope <= 0):
+        raise ValueError("参考规模配比响应幅度必须为正")
+
+    def phi(p):
+        return (raw_response(p)-center)*slope
+
+    # 阶段二：每个规模只估计“截距+形状函数的幅度”，不重拟合形状。
+    anchors = (reference, *later)
+    n = np.array([item[2] for item in anchors], dtype=float)
+    d = np.array([item[3] for item in anchors], dtype=float)
+    baseline, amplitude = [], []
+    for index, (p, y, _, _) in enumerate(anchors):
+        f = phi(p)
+        if index == 0:
+            scale = np.ones(y.shape[1])
+        else:
+            fc = f-np.mean(f, axis=0)
+            denominator = np.sum(fc**2, axis=0)
+            if np.any(denominator <= 1e-12):
+                raise ValueError("该规模的配比缺乏可辨识变化")
+            scale = np.sum(fc*(y-np.mean(y, axis=0)), axis=0)/denominator
+        if np.any(scale <= 0):
+            raise ValueError("配比响应幅度必须为正")
+        baseline.append(np.mean(y, axis=0)-scale*np.mean(f, axis=0))
+        amplitude.append(scale)
+    baseline, amplitude = np.stack(baseline), np.stack(amplitude)
+
+    # 阶段三：固定经典指数；用三个锚点的基线非负最小二乘解 E、A、B。
+    design = np.column_stack((np.ones(3), n**(-alpha), d**(-beta)))
+    eab = np.stack([nnls(design, baseline[:, k])[0]
+                    for k in range(y0.shape[1])])
+    # 前两点 D 相同，先由幅度比解 eta；第三点再条件求 zeta。
+    eta = -np.log(amplitude[1])/np.log(n[1]/n0)
+    zeta = (-np.log(amplitude[2])-eta*np.log(n[2]/n0))/np.log(d[2]/d0)
+
+    def predict(p, n_value, d_value):
+        base = (eab[:, 0]+eab[:, 1]*n_value**(-alpha)
+                +eab[:, 2]*d_value**(-beta))
+        scale = ((n_value/n0)**(-eta)*(d_value/d0)**(-zeta))
+        return base[None, :]+phi(p)*scale[None, :]
+
+    return {"ridge": strength, "EAB": eab, "eta": eta, "zeta": zeta,
+            "predict": predict}
+
+# 识别边界：仅有三个 (N,D) 观测锚点；最大规模 N、D 同时变化。
+# eta、zeta 是给定可分离幂律后的条件辨识，不保证域外外推成立。

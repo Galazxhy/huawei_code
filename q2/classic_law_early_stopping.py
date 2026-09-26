@@ -343,6 +343,7 @@ def _classic(
     )
 
 
+# 四个候选始终使用同一五参数标准律，只改变指数约束与搜索维数。
 MODEL_PATH = (
     ModelSpec(
         "shared_exponent",
@@ -398,7 +399,7 @@ def _linear_fit_at_exponents(
     alpha: float,
     beta: float,
 ) -> tuple[np.ndarray, np.ndarray, float] | None:
-    """固定指数后，以线性最小二乘估计 E、A、B。"""
+    """固定 ``alpha,beta``，最小二乘消去线性参数 ``E,A,B``。"""
 
     n_value, d_value, actual = arrays(observations)
     design = np.column_stack(
@@ -408,6 +409,7 @@ def _linear_fit_at_exponents(
             np.power(d_value, -beta),
         )
     )
+    # 每个指数候选仅用主拟合数据确定线性系数，验证集不进入最小二乘。
     coefficients = np.linalg.lstsq(design, actual, rcond=None)[0]
     e_value, a_value, b_value = map(float, coefficients)
     if (
@@ -434,7 +436,7 @@ def _search_one_exponent(
     grid_size: int,
     tolerance: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """执行共享指数或单坐标释放的一维可分离搜索。"""
+    """粗网格加局部步长减半，搜索共享指数或单个已释放指数。"""
 
     if grid_size < 5:
         raise ValueError("grid_size 至少为 5。")
@@ -637,8 +639,9 @@ def derive_adaptive_weights(
     minimum_weight: float,
     maximum_weight: float,
 ) -> tuple[dict[str, float], dict[str, dict[str, float | int]]]:
-    """由基准经典模型的难度和簇重采样稳定性一次性确定权重。"""
+    """由外部集的先验可靠性、难度与簇重采样稳定性冻结权重。"""
 
+    # 权重只用预先拟合的完整经典律计算一次，不随候选结构反复调整。
     reliability = {"B2": 0.55, "B3": 0.20, "B4": 1.00, "B5": 1.00}
     rng = np.random.default_rng(seed)
     diagnostics: dict[str, dict[str, float | int]] = {}
@@ -696,6 +699,7 @@ def derive_adaptive_weights(
             else 0.0
         )
         # floor 防止 B3 分数接近零时相对不确定度发散。
+        # 高误差提高难度权重，高重采样波动则降低可信度。
         stability = 1.0 / (
             1.0 + uncertainty / max(reference_score, 0.02)
         )
@@ -735,6 +739,7 @@ def evaluate_candidate(
     exponent_upper: float = 1.50,
     grid_size: int = 31,
 ) -> CandidateFit:
+    # 第一步只在主拟合集上拟合；外部集仅评价是否值得释放指数自由度。
     parameters, b1_prediction = fit_model(
         spec,
         b1_observations,
@@ -761,6 +766,7 @@ def evaluate_candidate(
     complexity_penalty = complexity_penalty_rate * max(
         0, spec.effective_parameter_count - 3
     )
+    # 主拟合质量作为准入门槛，复杂度惩罚抑制无收益的自由度释放。
     selection_score = validation_score + complexity_penalty
     eligible = b1_metrics_object.r_squared >= minimum_b1_r_squared
     return CandidateFit(
@@ -790,10 +796,10 @@ def run_parameter_release_early_stopping(
     exponent_upper: float = 1.50,
     grid_size: int = 31,
 ) -> tuple[list[CandidateFit], CandidateFit | None, int | None]:
-    """沿共享指数、单方向释放、完整二维搜索三层执行早停。
+    """按共享指数→单指数释放→双指数自由的层级选择结构。
 
-    同一层的候选先全部完成主数据拟合，再以冻结权重的验证分数选出层内
-    最优者。验证数据不参与任何网格点的选择。
+    并列的 ``release_alpha/release_beta`` 先分别完成主数据拟合，再比较
+    冻结权重的外部验证分数；连续 ``patience`` 层无实质改善时回滚历史最优。
     """
 
     specs = {spec.name: spec for spec in MODEL_PATH}
@@ -802,6 +808,7 @@ def run_parameter_release_early_stopping(
     bad_layer_count = 0
     stop_layer: int | None = None
 
+    # 共享指数 s* 是后续两种单指数释放的共同锚点。
     shared = evaluate_candidate(
         spec=specs["shared_exponent"],
         b1_observations=b1_observations,
@@ -833,6 +840,7 @@ def run_parameter_release_early_stopping(
         (3, (specs["classic"],)),
     )
     for layer, layer_specs in layers:
+        # 必须完成整层比较，不能因为先看到一个候选较差就提前停止。
         layer_candidates = [
             evaluate_candidate(
                 spec=spec,
@@ -854,6 +862,7 @@ def run_parameter_release_early_stopping(
         eligible = [candidate for candidate in layer_candidates if candidate.eligible]
         layer_best = min(eligible, key=lambda item: item.selection_score) if eligible else None
 
+        # 改善幅度须超过 minimum_delta，否则计为一个未改进复杂度层。
         if layer_best is not None and (
             best is None
             or layer_best.selection_score < best.selection_score - minimum_delta

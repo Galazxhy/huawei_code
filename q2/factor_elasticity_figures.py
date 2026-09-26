@@ -211,7 +211,7 @@ def mixture_directional_gain(payload: dict, rows: list[dict]) -> plt.Figure:
                     grid[i, j] = value
         image = axis.imshow(grid, aspect="auto", cmap="RdBu_r", norm=norm)
         axis.set_xticks(range(len(sources)))
-        axis.set_xticklabels(sources, rotation=30, ha="right", fontsize=9)
+        axis.set_xticklabels(sources, rotation=45, ha="right", fontsize=9)
         # if i == 0:
         axis.set_yticks(range(len(domains)))
         axis.set_yticklabels(domains, fontsize=11)

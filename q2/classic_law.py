@@ -188,7 +188,7 @@ def _linear_fit_for_exponents(
     beta: float,
     enforce_physical_constraints: bool = True,
 ) -> tuple[ScalingParameters, float] | None:
-    """固定 alpha、beta 后，以最小二乘估计 E、A、B。"""
+    """固定非线性指数后，在线性子问题中估计 ``(E, A, B)``。"""
 
     count = len(observations)
     sum_x = sum_z = sum_xx = sum_zz = sum_xz = 0.0
@@ -211,6 +211,7 @@ def _linear_fit_for_exponents(
         sum_zy += z_value * y_value
         min_loss = min(min_loss, y_value)
 
+    # 设计矩阵的三列为 1、N^(-alpha)、D^(-beta)；这里只解三维正规方程。
     coefficients = _solve_3x3(
         (
             (float(count), sum_x, sum_z),
@@ -223,6 +224,7 @@ def _linear_fit_for_exponents(
         return None
 
     irreducible_loss, parameter_coefficient, data_coefficient = coefficients
+    # 正系数与 E<min(L) 保证规模增大时损失下降，且不可约损失低于观测值。
     if enforce_physical_constraints and (
         irreducible_loss < 0
         or irreducible_loss >= min_loss
@@ -267,9 +269,10 @@ def fit_scaling_law(
     tolerance: float = 1e-7,
     enforce_physical_constraints: bool = True,
 ) -> FitResult:
-    """以可分离非线性最小二乘拟合经典标度律。
+    """先消去线性参数，再在 ``(alpha, beta)`` 平面搜索最小残差。
 
-    先在 alpha-beta 平面做粗网格搜索，再用八邻域模式搜索连续细化。
+    每个网格点均重新最小二乘拟合 ``E,A,B``；粗搜后以八邻域逐级细化，
+    因而非线性搜索始终只有两个指数维度。
     """
 
     if exponent_lower <= 0 or exponent_upper <= exponent_lower:
@@ -277,6 +280,7 @@ def fit_scaling_law(
     if grid_size < 5:
         raise ValueError("grid_size 至少为 5。")
 
+    # 第一阶段：指数粗网格；不可行的线性解不参加比较。
     best: tuple[ScalingParameters, float] | None = None
     for alpha in _grid_values(exponent_lower, exponent_upper, grid_size):
         for beta in _grid_values(exponent_lower, exponent_upper, grid_size):
@@ -289,13 +293,13 @@ def fit_scaling_law(
     if best is None:
         raise RuntimeError("在给定指数范围内没有找到满足约束的可行解。")
 
-    alpha_step = (exponent_upper - exponent_lower) / (grid_size - 1)
-    beta_step = alpha_step
-    while max(alpha_step, beta_step) > tolerance:
-        current_parameters, current_sse = best
+    # 第二阶段：围绕当前最优指数作八邻域搜索，停滞时将步长减半。
+    step = (exponent_upper - exponent_lower) / (grid_size - 1)
+    while step > tolerance:
+        current_parameters, _ = best
         improved = False
-        for alpha_delta in (-alpha_step, 0.0, alpha_step):
-            for beta_delta in (-beta_step, 0.0, beta_step):
+        for alpha_delta in (-step, 0.0, step):
+            for beta_delta in (-step, 0.0, step):
                 if alpha_delta == 0.0 and beta_delta == 0.0:
                     continue
                 alpha = current_parameters.parameter_exponent + alpha_delta
@@ -312,8 +316,7 @@ def fit_scaling_law(
                     best = candidate
                     improved = True
         if not improved:
-            alpha_step /= 2.0
-            beta_step /= 2.0
+            step /= 2.0
 
     parameters, _ = best
     return FitResult(parameters=parameters, metrics=calculate_metrics(observations, parameters))
