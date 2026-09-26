@@ -1,0 +1,11 @@
+name: huawei-modeling
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=2.4.6
+  - pandas=3.0.6
+  - scipy=1.17.1
+  - scikit-learn=1.9.1
+  - matplotlib=3.11.2
+  - seaborn=0.13.2
